@@ -26,9 +26,7 @@ Automated weather arbitrage trading bot for Polymarket prediction markets.
 ```
 
 3. **Access:**
-   - Dashboard: http://localhost:5000
-   - phpMyAdmin: http://localhost:8081
-   - Telegram: Check your bot for alerts
+   - your own
 
 ## Configuration
 
@@ -58,7 +56,7 @@ Bot runs every 2 hours:
 
 ## Development
 
-Built by: Dayo (PT Dynamic Container Lines)
+Built by: Dayo 
 Location: Jakarta, Indonesia
 Version: 1.0
 Date: March 2026
