@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # Weather Trading Bot
+  weather-bot:
+    build: .
+    container_name: weather-bot
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+    depends_on:
+      - mysql
+    networks:
+      - weather-net
+
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: weather-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_weather_data:/var/lib/mysql
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    networks:
+      - weather-net
+
+  # phpMyAdmin
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: weather-phpmyadmin
+    restart: always
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+    ports:
+      - "8081:80"
+    depends_on:
+      - mysql
+    networks:
+      - weather-net
+
+networks:
+  weather-net:
+    driver: bridge
+
+volumes:
+  mysql_weather_data:

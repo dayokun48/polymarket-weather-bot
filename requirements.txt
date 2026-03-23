@@ -1,0 +1,31 @@
+# Web Framework
+flask==3.0.0
+flask-cors==4.0.0
+
+# HTTP & APIs
+requests==2.31.0
+urllib3==2.1.0
+
+# Telegram Bot
+python-telegram-bot==20.7
+
+# Database
+sqlalchemy==2.0.23
+pymysql==1.1.0
+
+# Environment Variables
+python-dotenv==1.0.0
+
+# Data Processing
+pandas==2.1.4
+numpy==1.26.2
+
+# Task Scheduling
+APScheduler==3.10.4
+
+# Date/Time
+python-dateutil==2.8.2
+
+# Web3 (for Polymarket)
+web3==6.15.1
+eth-account==0.10.0
