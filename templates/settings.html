@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Weather Trading Bot{% endblock %}
+
+{% block content %}
+<div class="settings-page">
+    <h2>⚙️ Bot Settings</h2>
+    
+    <form method="post" class="settings-form">
+        <div class="settings-section">
+            <h3>🤖 Automation</h3>
+            
+            <div class="form-group">
+                <label for="automation_mode">Automation Mode</label>
+                <select id="automation_mode" name="automation_mode">
+                    <option value="semi-auto" {% if settings.get('automation_mode') == 'semi-auto' %}selected{% endif %}>
+                        Semi-Auto (Telegram approval required)
+                    </option>
+                    <option value="selective-auto" {% if settings.get('automation_mode') == 'selective-auto' %}selected{% endif %}>
+                        Selective-Auto (Auto if confidence > 90%)
+                    </option>
+                    <option value="full-auto" {% if settings.get('automation_mode') == 'full-auto' %}selected{% endif %}>
+                        Full-Auto (Execute all signals)
+                    </option>
+                </select>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <h3>🎯 Signal Filters</h3>
+            
+            <div class="form-group">
+                <label for="min_edge_pct">Minimum Edge (%)</label>
+                <input type="number" id="min_edge_pct" name="min_edge_pct" 
+                       value="{{ settings.get('min_edge_pct', '15') }}" 
+                       min="5" max="50" step="1">
+                <small>Only send signals with edge above this threshold</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="min_confidence_pct">Minimum Confidence (%)</label>
+                <input type="number" id="min_confidence_pct" name="min_confidence_pct" 
+                       value="{{ settings.get('min_confidence_pct', '80') }}" 
+                       min="50" max="100" step="1">
+                <small>Only send signals with confidence above this threshold</small>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <h3>💰 Risk Management</h3>
+            
+            <div class="form-group">
+                <label for="max_bet_pct">Maximum Bet Size (% of bankroll)</label>
+                <input type="number" id="max_bet_pct" name="max_bet_pct" 
+                       value="{{ settings.get('max_bet_pct', '0.05') }}" 
+                       min="0.01" max="0.20" step="0.01">
+                <small>Maximum position size per trade (0.05 = 5%)</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="max_daily_trades">Maximum Daily Trades</label>
+                <input type="number" id="max_daily_trades" name="max_daily_trades" 
+                       value="{{ settings.get('max_daily_trades', '10') }}" 
+                       min="1" max="50" step="1">
+                <small>Circuit breaker: max trades per day</small>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <h3>⏰ Scheduling</h3>
+            
+            <div class="form-group">
+                <label for="check_interval_hours">Scan Interval (hours)</label>
+                <input type="number" id="check_interval_hours" name="check_interval_hours" 
+                       value="{{ settings.get('check_interval_hours', '2') }}" 
+                       min="1" max="24" step="1">
+                <small>How often to scan for opportunities</small>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn-primary">Save Settings</button>
+            <button type="reset" class="btn-secondary">Reset</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

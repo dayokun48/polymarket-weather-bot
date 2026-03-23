@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}Performance - Weather Trading Bot{% endblock %}
+
+{% block content %}
+<div class="performance-page">
+    <h2>📊 Performance Analytics</h2>
+    
+    <div class="performance-overview">
+        <div class="perf-card">
+            <h3>Total Trades</h3>
+            <div class="perf-value">{{ total_trades }}</div>
+            <div class="perf-detail">{{ wins }}W / {{ losses }}L</div>
+        </div>
+        
+        <div class="perf-card">
+            <h3>Win Rate</h3>
+            <div class="perf-value">{{ "%.1f"|format(win_rate) }}%</div>
+        </div>
+        
+        <div class="perf-card">
+            <h3>Total Invested</h3>
+            <div class="perf-value">${{ "%.2f"|format(total_invested) }}</div>
+        </div>
+        
+        <div class="perf-card {% if total_pnl > 0 %}positive{% else %}negative{% endif %}">
+            <h3>Total P&L</h3>
+            <div class="perf-value">${{ "%+.2f"|format(total_pnl) }}</div>
+        </div>
+        
+        <div class="perf-card {% if roi > 0 %}positive{% else %}negative{% endif %}">
+            <h3>ROI</h3>
+            <div class="perf-value">{{ "%+.1f"|format(roi) }}%</div>
+        </div>
+        
+        <div class="perf-card">
+            <h3>Avg Trade Size</h3>
+            <div class="perf-value">${{ "%.2f"|format(avg_trade_size) }}</div>
+        </div>
+    </div>
+
+    <div class="charts-section">
+        <div class="chart-container">
+            <h3>Daily P&L (Last 30 Days)</h3>
+            <canvas id="pnlChart" width="800" height="300"></canvas>
+        </div>
+    </div>
+
+    <div class="trade-highlights">
+        <div class="highlight-card positive">
+            <h3>🏆 Best Trade</h3>
+            {% if best_trade %}
+            <div class="trade-details">
+                <p class="trade-market">{{ best_trade.market.question[:60] }}...</p>
+                <p class="trade-pnl">${{ "%+.2f"|format(best_trade.realized_pnl) }}</p>
+                <p class="trade-date">{{ best_trade.closed_at.strftime('%Y-%m-%d') }}</p>
+            </div>
+            {% else %}
+            <p>No trades yet</p>
+            {% endif %}
+        </div>
+        
+        <div class="highlight-card negative">
+            <h3>📉 Worst Trade</h3>
+            {% if worst_trade %}
+            <div class="trade-details">
+                <p class="trade-market">{{ worst_trade.market.question[:60] }}...</p>
+                <p class="trade-pnl">${{ "%+.2f"|format(worst_trade.realized_pnl) }}</p>
+                <p class="trade-date">{{ worst_trade.closed_at.strftime('%Y-%m-%d') }}</p>
+            </div>
+            {% else %}
+            <p>No trades yet</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="daily-performance">
+        <h3>📅 Daily Performance (Last 30 Days)</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Trades</th>
+                    <th>W/L</th>
+                    <th>Win Rate</th>
+                    <th>Invested</th>
+                    <th>P&L</th>
+                    <th>ROI</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for day in daily_stats %}
+                <tr>
+                    <td>{{ day.date.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ day.total_trades }}</td>
+                    <td>{{ day.wins }}/{{ day.losses }}</td>
+                    <td>{{ "%.0f"|format(day.win_rate) }}%</td>
+                    <td>${{ "%.2f"|format(day.total_invested) }}</td>
+                    <td class="{% if day.realized_pnl > 0 %}positive{% else %}negative{% endif %}">
+                        ${{ "%+.2f"|format(day.realized_pnl) }}
+                    </td>
+                    <td class="{% if day.roi > 0 %}positive{% else %}negative{% endif %}">
+                        {{ "%+.1f"|format(day.roi) }}%
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+// Simple chart using ASCII bars (replace with Chart.js in production)
+const chartData = {
+    dates: {{ chart_dates | tojson }},
+    pnl: {{ chart_pnl | tojson }}
+};
+console.log('Chart data loaded:', chartData);
+</script>
+{% endblock %}

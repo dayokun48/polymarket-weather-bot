@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Weather Trading Bot{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <h1>🌧️ Weather Trading Bot</h1>
+        </div>
+        <div class="nav-menu">
+            <a href="{{ url_for('overview.index') }}" class="nav-link">Dashboard</a>
+            <a href="{{ url_for('signals.list_signals') }}" class="nav-link">Signals</a>
+            <a href="{{ url_for('positions.list_positions') }}" class="nav-link">Positions</a>
+            <a href="{{ url_for('performance.show_performance') }}" class="nav-link">Performance</a>
+            <a href="{{ url_for('settings.manage_settings') }}" class="nav-link">Settings</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <footer>
+        <p>Weather Trading Bot v1.0 | Built by Dayo | Jakarta, Indonesia</p>
+    </footer>
+</body>
+</html>

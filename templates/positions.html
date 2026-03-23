@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Positions - Weather Trading Bot{% endblock %}
+
+{% block content %}
+<div class="positions-page">
+    <h2>📈 Trading Positions</h2>
+    
+    <div class="positions-stats">
+        <div class="stat-box">
+            <h3>Open Positions</h3>
+            <div class="stat-value">{{ total_open }}</div>
+            <div class="stat-label">Total Exposure: ${{ "%.2f"|format(total_exposure) }}</div>
+        </div>
+        
+        <div class="stat-box">
+            <h3>Closed Positions</h3>
+            <div class="stat-value">{{ total_closed }}</div>
+            <div class="stat-label">{{ wins }}W / {{ losses }}L</div>
+        </div>
+        
+        <div class="stat-box">
+            <h3>Win Rate</h3>
+            <div class="stat-value">{{ "%.1f"|format(win_rate) }}%</div>
+        </div>
+        
+        <div class="stat-box {% if total_pnl > 0 %}positive{% else %}negative{% endif %}">
+            <h3>Total P&L</h3>
+            <div class="stat-value">${{ "%+.2f"|format(total_pnl) }}</div>
+        </div>
+    </div>
+
+    <div class="positions-section">
+        <h3>🟢 Open Positions</h3>
+        {% if open_positions %}
+        <table class="positions-table">
+            <thead>
+                <tr>
+                    <th>Opened</th>
+                    <th>Market</th>
+                    <th>Direction</th>
+                    <th>Amount</th>
+                    <th>Entry</th>
+                    <th>Shares</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pos in open_positions %}
+                <tr>
+                    <td>{{ pos.executed_at.strftime('%m/%d %H:%M') }}</td>
+                    <td class="market-cell">{{ pos.market.question[:50] }}...</td>
+                    <td><span class="badge {{ pos.direction.lower() }}">{{ pos.direction }}</span></td>
+                    <td>${{ "%.2f"|format(pos.bet_size) }}</td>
+                    <td>{{ "%.2f"|format(pos.entry_price) }}¢</td>
+                    <td>{{ "%.1f"|format(pos.shares) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty-state">No open positions</p>
+        {% endif %}
+    </div>
+
+    <div class="positions-section">
+        <h3>🔒 Closed Positions (Last 30)</h3>
+        {% if closed_positions %}
+        <table class="positions-table">
+            <thead>
+                <tr>
+                    <th>Closed</th>
+                    <th>Market</th>
+                    <th>Direction</th>
+                    <th>Amount</th>
+                    <th>Outcome</th>
+                    <th>P&L</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pos in closed_positions %}
+                <tr>
+                    <td>{{ pos.closed_at.strftime('%m/%d %H:%M') }}</td>
+                    <td class="market-cell">{{ pos.market.question[:50] }}...</td>
+                    <td><span class="badge {{ pos.direction.lower() }}">{{ pos.direction }}</span></td>
+                    <td>${{ "%.2f"|format(pos.bet_size) }}</td>
+                    <td><span class="badge outcome-{{ pos.outcome.lower() }}">{{ pos.outcome }}</span></td>
+                    <td class="{% if pos.realized_pnl > 0 %}positive{% else %}negative{% endif %}">
+                        ${{ "%+.2f"|format(pos.realized_pnl) }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty-state">No closed positions</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

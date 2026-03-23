@@ -33,3 +33,5 @@ docker-compose.override.yml
 # Temporary files
 *.tmp
 *.bak
+
+check_system.py
