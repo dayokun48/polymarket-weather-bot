@@ -1,23 +1,20 @@
 {% extends "base.html" %}
-
 {% block title %}Signals - Weather Trading Bot{% endblock %}
-
 {% block content %}
 <div class="signals-page">
     <h2>🔔 Trading Signals</h2>
-    
+
     <div class="filters">
         <form method="get" class="filter-form">
             <select name="status" onchange="this.form.submit()">
-                <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All Status</option>
-                <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending</option>
+                <option value="all"      {% if status_filter == 'all'      %}selected{% endif %}>All Status</option>
+                <option value="pending"  {% if status_filter == 'pending'  %}selected{% endif %}>Pending</option>
                 <option value="executed" {% if status_filter == 'executed' %}selected{% endif %}>Executed</option>
-                <option value="skipped" {% if status_filter == 'skipped' %}selected{% endif %}>Skipped</option>
+                <option value="skipped"  {% if status_filter == 'skipped'  %}selected{% endif %}>Skipped</option>
             </select>
-            
             <select name="days" onchange="this.form.submit()">
-                <option value="1" {% if days_filter == 1 %}selected{% endif %}>Last 24 hours</option>
-                <option value="7" {% if days_filter == 7 %}selected{% endif %}>Last 7 days</option>
+                <option value="1"  {% if days_filter == 1  %}selected{% endif %}>Last 24 hours</option>
+                <option value="7"  {% if days_filter == 7  %}selected{% endif %}>Last 7 days</option>
                 <option value="30" {% if days_filter == 30 %}selected{% endif %}>Last 30 days</option>
             </select>
         </form>
@@ -48,17 +45,24 @@
             <tbody>
                 {% for signal in signals %}
                 <tr>
-                    <td>{{ signal.created_at.strftime('%m/%d %H:%M') }}</td>
-                    <td>{{ signal.location }}</td>
-                    <td class="market-cell">{{ signal.market.question[:60] }}...</td>
+                    <td>
+                        <!-- FIX: signal.created_at dari pymysql adalah datetime, handle None -->
+                        {% if signal.created_at %}{{ signal.created_at.strftime('%m/%d %H:%M') }}{% endif %}
+                    </td>
+                    <td>{{ signal.location or '-' }}</td>
+                    <!-- FIX: signal.market.question → signal.market_question -->
+                    <td class="market-cell">{{ (signal.market_question or '')[:60] }}...</td>
                     <td><span class="badge {{ signal.direction.lower() }}">{{ signal.direction }}</span></td>
-                    <td><strong>+{{ "%.0f"|format(signal.edge) }}%</strong></td>
-                    <td>{{ "%.0f"|format(signal.confidence) }}%</td>
+                    <td><strong>+{{ "%.0f"|format(signal.edge or 0) }}%</strong></td>
+                    <td>{{ "%.0f"|format(signal.confidence or 0) }}%</td>
                     <td><span class="badge status-{{ signal.status }}">{{ signal.status }}</span></td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
+        {% if not signals %}
+        <p class="empty-state">No signals found for the selected filter.</p>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

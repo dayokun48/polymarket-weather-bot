@@ -12,14 +12,14 @@
             <h1>🌧️ Weather Trading Bot</h1>
         </div>
         <div class="nav-menu">
-            <a href="{{ url_for('overview.index') }}" class="nav-link">Dashboard</a>
-            <a href="{{ url_for('signals.list_signals') }}" class="nav-link">Signals</a>
-            <a href="{{ url_for('positions.list_positions') }}" class="nav-link">Positions</a>
+            <a href="{{ url_for('overview.index') }}"            class="nav-link">Dashboard</a>
+            <a href="{{ url_for('markets.list_markets') }}"      class="nav-link">Markets</a>
+            <a href="{{ url_for('signals.list_signals') }}"      class="nav-link">Signals</a>
+            <a href="{{ url_for('positions.list_positions') }}"  class="nav-link">Positions</a>
             <a href="{{ url_for('performance.show_performance') }}" class="nav-link">Performance</a>
-            <a href="{{ url_for('settings.manage_settings') }}" class="nav-link">Settings</a>
+            <a href="{{ url_for('settings.manage_settings') }}"  class="nav-link">Settings</a>
         </div>
     </nav>
-
     <div class="container">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -28,10 +28,8 @@
                 {% endfor %}
             {% endif %}
         {% endwith %}
-
         {% block content %}{% endblock %}
     </div>
-
     <footer>
         <p>Weather Trading Bot v1.0 | Built by Dayo | Jakarta, Indonesia</p>
     </footer>

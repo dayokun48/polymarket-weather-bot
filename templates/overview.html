@@ -1,11 +1,9 @@
 {% extends "base.html" %}
-
 {% block title %}Dashboard - Weather Trading Bot{% endblock %}
-
 {% block content %}
 <div class="dashboard">
     <h2>📊 Dashboard Overview</h2>
-    
+
     <div class="stats-grid">
         <div class="stat-card">
             <div class="stat-icon">📊</div>
@@ -14,7 +12,6 @@
                 <div class="stat-value">{{ total_signals_today }}</div>
             </div>
         </div>
-        
         <div class="stat-card">
             <div class="stat-icon">📈</div>
             <div class="stat-content">
@@ -22,7 +19,6 @@
                 <div class="stat-value">{{ total_open_positions }}</div>
             </div>
         </div>
-        
         <div class="stat-card">
             <div class="stat-icon">💰</div>
             <div class="stat-content">
@@ -30,7 +26,6 @@
                 <div class="stat-value">${{ "%.2f"|format(total_exposure) }}</div>
             </div>
         </div>
-        
         <div class="stat-card {% if total_pnl > 0 %}positive{% else %}negative{% endif %}">
             <div class="stat-icon">💵</div>
             <div class="stat-content">
@@ -38,7 +33,6 @@
                 <div class="stat-value">${{ "%+.2f"|format(total_pnl) }}</div>
             </div>
         </div>
-        
         <div class="stat-card">
             <div class="stat-icon">🎯</div>
             <div class="stat-content">
@@ -46,7 +40,6 @@
                 <div class="stat-value">{{ "%.1f"|format(win_rate) }}%</div>
             </div>
         </div>
-        
         <div class="stat-card">
             <div class="stat-icon">📝</div>
             <div class="stat-content">
@@ -60,47 +53,53 @@
         <div class="section">
             <h3>🔔 Recent Signals (Last 24h)</h3>
             {% if recent_signals %}
-                <div class="signals-list">
-                    {% for signal in recent_signals %}
-                    <div class="signal-item">
-                        <div class="signal-header">
-                            <span class="signal-location">📍 {{ signal.location }}</span>
-                            <span class="signal-edge">+{{ "%.0f"|format(signal.edge) }}% edge</span>
-                        </div>
-                        <div class="signal-market">{{ signal.market.question[:80] }}...</div>
-                        <div class="signal-footer">
-                            <span class="signal-direction {{ signal.direction.lower() }}">{{ signal.direction }}</span>
-                            <span class="signal-confidence">{{ "%.0f"|format(signal.confidence) }}% confidence</span>
-                            <span class="signal-time">{{ signal.created_at.strftime('%H:%M') }}</span>
-                        </div>
+            <div class="signals-list">
+                {% for signal in recent_signals %}
+                <div class="signal-item">
+                    <div class="signal-header">
+                        <span class="signal-location">📍 {{ signal.location }}</span>
+                        <span class="signal-edge">+{{ "%.0f"|format(signal.edge) }}% edge</span>
                     </div>
-                    {% endfor %}
+                    <!-- FIX: signal.market.question → signal.market_question (dict dari pymysql) -->
+                    <div class="signal-market">{{ (signal.market_question or '')[:80] }}...</div>
+                    <div class="signal-footer">
+                        <span class="signal-direction {{ signal.direction.lower() }}">{{ signal.direction }}</span>
+                        <span class="signal-confidence">{{ "%.0f"|format(signal.confidence) }}% confidence</span>
+                        <span class="signal-time">
+                            {% if signal.created_at %}
+                                {{ signal.created_at.strftime('%H:%M') }}
+                            {% endif %}
+                        </span>
+                    </div>
                 </div>
+                {% endfor %}
+            </div>
             {% else %}
-                <p class="empty-state">No signals in the last 24 hours</p>
+            <p class="empty-state">No signals in the last 24 hours</p>
             {% endif %}
         </div>
 
         <div class="section">
             <h3>📈 Open Positions</h3>
             {% if open_trades %}
-                <div class="positions-list">
-                    {% for trade in open_trades %}
-                    <div class="position-item">
-                        <div class="position-header">
-                            <span class="position-direction {{ trade.direction.lower() }}">{{ trade.direction }}</span>
-                            <span class="position-amount">${{ "%.2f"|format(trade.bet_size) }}</span>
-                        </div>
-                        <div class="position-market">{{ trade.market.question[:80] }}...</div>
-                        <div class="position-footer">
-                            <span>Entry: {{ "%.2f"|format(trade.entry_price) }}¢</span>
-                            <span>Shares: {{ "%.1f"|format(trade.shares) }}</span>
-                        </div>
+            <div class="positions-list">
+                {% for trade in open_trades %}
+                <div class="position-item">
+                    <div class="position-header">
+                        <span class="position-direction {{ trade.direction.lower() }}">{{ trade.direction }}</span>
+                        <span class="position-amount">${{ "%.2f"|format(trade.bet_size) }}</span>
                     </div>
-                    {% endfor %}
+                    <!-- FIX: trade.market.question → trade.market_question -->
+                    <div class="position-market">{{ (trade.market_question or '')[:80] }}...</div>
+                    <div class="position-footer">
+                        <span>Entry: {{ "%.4f"|format(trade.entry_price) }}</span>
+                        <span>Shares: {{ "%.2f"|format(trade.shares) }}</span>
+                    </div>
                 </div>
+                {% endfor %}
+            </div>
             {% else %}
-                <p class="empty-state">No open positions</p>
+            <p class="empty-state">No open positions</p>
             {% endif %}
         </div>
     </div>

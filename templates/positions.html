@@ -1,29 +1,24 @@
 {% extends "base.html" %}
-
 {% block title %}Positions - Weather Trading Bot{% endblock %}
-
 {% block content %}
 <div class="positions-page">
     <h2>📈 Trading Positions</h2>
-    
+
     <div class="positions-stats">
         <div class="stat-box">
             <h3>Open Positions</h3>
             <div class="stat-value">{{ total_open }}</div>
             <div class="stat-label">Total Exposure: ${{ "%.2f"|format(total_exposure) }}</div>
         </div>
-        
         <div class="stat-box">
             <h3>Closed Positions</h3>
             <div class="stat-value">{{ total_closed }}</div>
             <div class="stat-label">{{ wins }}W / {{ losses }}L</div>
         </div>
-        
         <div class="stat-box">
             <h3>Win Rate</h3>
             <div class="stat-value">{{ "%.1f"|format(win_rate) }}%</div>
         </div>
-        
         <div class="stat-box {% if total_pnl > 0 %}positive{% else %}negative{% endif %}">
             <h3>Total P&L</h3>
             <div class="stat-value">${{ "%+.2f"|format(total_pnl) }}</div>
@@ -47,12 +42,14 @@
             <tbody>
                 {% for pos in open_positions %}
                 <tr>
-                    <td>{{ pos.executed_at.strftime('%m/%d %H:%M') }}</td>
-                    <td class="market-cell">{{ pos.market.question[:50] }}...</td>
+                    <!-- FIX: pos.executed_at adalah datetime dari DB, handle None -->
+                    <td>{% if pos.executed_at %}{{ pos.executed_at.strftime('%m/%d %H:%M') }}{% endif %}</td>
+                    <!-- FIX: pos.market.question → pos.market_question -->
+                    <td class="market-cell">{{ (pos.market_question or '')[:50] }}...</td>
                     <td><span class="badge {{ pos.direction.lower() }}">{{ pos.direction }}</span></td>
-                    <td>${{ "%.2f"|format(pos.bet_size) }}</td>
-                    <td>{{ "%.2f"|format(pos.entry_price) }}¢</td>
-                    <td>{{ "%.1f"|format(pos.shares) }}</td>
+                    <td>${{ "%.2f"|format(pos.bet_size or 0) }}</td>
+                    <td>{{ "%.4f"|format(pos.entry_price or 0) }}</td>
+                    <td>{{ "%.2f"|format(pos.shares or 0) }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -79,13 +76,16 @@
             <tbody>
                 {% for pos in closed_positions %}
                 <tr>
-                    <td>{{ pos.closed_at.strftime('%m/%d %H:%M') }}</td>
-                    <td class="market-cell">{{ pos.market.question[:50] }}...</td>
+                    <!-- FIX: pos.closed_at handle None -->
+                    <td>{% if pos.closed_at %}{{ pos.closed_at.strftime('%m/%d %H:%M') }}{% endif %}</td>
+                    <!-- FIX: pos.market.question → pos.market_question -->
+                    <td class="market-cell">{{ (pos.market_question or '')[:50] }}...</td>
                     <td><span class="badge {{ pos.direction.lower() }}">{{ pos.direction }}</span></td>
-                    <td>${{ "%.2f"|format(pos.bet_size) }}</td>
-                    <td><span class="badge outcome-{{ pos.outcome.lower() }}">{{ pos.outcome }}</span></td>
-                    <td class="{% if pos.realized_pnl > 0 %}positive{% else %}negative{% endif %}">
-                        ${{ "%+.2f"|format(pos.realized_pnl) }}
+                    <td>${{ "%.2f"|format(pos.bet_size or 0) }}</td>
+                    <!-- FIX: outcome 'win'/'loss' lowercase sesuai schema -->
+                    <td><span class="badge outcome-{{ pos.outcome or 'open' }}">{{ pos.outcome or '-' }}</span></td>
+                    <td class="{% if (pos.realized_pnl or 0) > 0 %}positive{% else %}negative{% endif %}">
+                        ${{ "%+.2f"|format(pos.realized_pnl or 0) }}
                     </td>
                 </tr>
                 {% endfor %}

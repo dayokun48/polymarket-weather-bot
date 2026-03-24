@@ -1,221 +1,492 @@
 """
-Weather Arbitrage Analyzer
-Finds opportunities by comparing NOAA vs Polymarket
+weather_analyzer.py
+====================
+Analyzes weather forecasts vs Polymarket odds.
+
+Fixes vs sebelumnya (sesuai schema database):
+  - Field naming sesuai kolom tabel signals:
+    weather_prob  → noaa_probability (tapi tetap simpan keduanya di signal dict)
+    market_prob   → market_probability
+  - Signal dict sekarang punya semua field yang dibutuhkan risk_manager
+    untuk insert ke signals table
 """
 
 import logging
-from typing import List, Dict, Optional
-from datetime import datetime, timedelta
+import re
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
+
+import config
 
 logger = logging.getLogger(__name__)
 
+
 class WeatherAnalyzer:
     """
-    Analyzes weather forecasts vs market odds
-    Finds arbitrage opportunities
+    Analyze weather forecasts vs Polymarket odds.
+    Handles both market types:
+      - Binary  : "Will it rain in NYC tomorrow?" → YES/NO
+      - Bracket : "Highest temp in Seoul on March 25?" → 11 sub-markets
     """
-    
+
     def __init__(self, noaa_collector, polymarket_collector):
-        self.noaa = noaa_collector
+        self.weather    = noaa_collector
         self.polymarket = polymarket_collector
-    
-    def find_opportunities(self, location: str) -> List[Dict]:
+
+    # ── Main entry point ───────────────────────────────────────────────────────
+
+    def find_opportunities(self, location: str = None) -> List[Dict]:
         """
-        Find arbitrage opportunities for location
-        
-        Returns list of signals
+        Scan semua weather markets dan cari peluang trading.
+        Returns list of signals sorted by edge descending.
         """
         signals = []
-        
+
         try:
-            # Get NOAA forecast
-            forecast = self.noaa.get_forecast(location)
-            if not forecast:
-                logger.warning(f"No forecast available for {location}")
-                return []
-            
-            # Get Polymarket markets
             markets = self.polymarket.search_weather_markets(location)
             if not markets:
-                logger.info(f"No weather markets found for {location}")
+                logger.info("Tidak ada weather market ditemukan")
                 return []
-            
-            logger.info(f"Analyzing {len(markets)} markets for {location}")
-            
-            # Compare each market with forecast
+
+            logger.info(f"Menganalisa {len(markets)} market...")
+
             for market in markets:
-                signal = self._analyze_market(market, forecast)
-                
+                market_type = market.get("type", "binary")
+                if market_type == "bracket":
+                    result = self._analyze_bracket(market)
+                    if result:
+                        signals.extend(result)
+                else:
+                    result = self._analyze_binary(market)
+                    if result:
+                        signals.append(result)
+
+            signals.sort(key=lambda x: x["edge"], reverse=True)
+            logger.info(f"✅ Ditemukan {len(signals)} signal")
+            return signals
+
+        except Exception as e:
+            logger.error(f"Error find_opportunities: {e}")
+            return []
+
+    # ── Binary market ──────────────────────────────────────────────────────────
+
+    def _analyze_binary(self, market: Dict) -> Optional[Dict]:
+        try:
+            question    = market.get("question", "")
+            location    = self.polymarket.extract_location_from_question(question)
+            target_date = self.polymarket.extract_date_from_question(question)
+
+            if not target_date and market.get("end_date"):
+                target_date = market["end_date"].strftime("%Y-%m-%d")
+            if not target_date or not location:
+                return None
+            if not self._passes_market_filter(market):
+                return None
+
+            q_lower  = question.lower()
+            is_rain  = any(w in q_lower for w in ["rain", "precipitation", "shower"])
+            is_temp  = any(w in q_lower for w in ["temperature", "degrees", "celsius", "fahrenheit"])
+            is_snow  = any(w in q_lower for w in ["snow", "blizzard"])
+
+            if not (is_rain or is_temp or is_snow):
+                return None
+
+            consensus = self.weather.get_consensus(location, target_date)
+            if not consensus:
+                return None
+
+            if is_rain:
+                weather_prob = (consensus["avg_rain_prob"] or 0) / 100
+                signal_type  = "weather_rain"
+            elif is_temp:
+                weather_prob = self._estimate_temp_probability(question, consensus)
+                signal_type  = "weather_temperature"
+            else:
+                weather_prob = (consensus["avg_rain_prob"] or 0) / 100
+                signal_type  = "weather_snow"
+
+            if weather_prob is None:
+                return None
+
+            return self._build_signal(
+                market       = market,
+                weather_prob = weather_prob,
+                consensus    = consensus,
+                target_date  = target_date,
+                signal_type  = signal_type,
+                location     = location,
+            )
+
+        except Exception as e:
+            logger.error(f"Error _analyze_binary {market.get('id')}: {e}")
+            return None
+
+    # ── Bracket market ─────────────────────────────────────────────────────────
+
+    def _analyze_bracket(self, event: Dict) -> List[Dict]:
+        signals = []
+        try:
+            title       = event.get("title", "")
+            target_date = self.polymarket.extract_date_from_question(title)
+            location    = self.polymarket.extract_location_from_question(title)
+
+            if not target_date and event.get("end_date"):
+                target_date = event["end_date"].strftime("%Y-%m-%d")
+            if not target_date or not location:
+                return []
+
+            consensus = self.weather.get_consensus(location, target_date)
+            if not consensus:
+                return []
+
+            avg_temp    = consensus.get("avg_temp_high")
+            temp_spread = consensus.get("temp_spread", 0)
+            if avg_temp is None:
+                return []
+
+            logger.info(
+                f"Bracket: {title} | forecast={avg_temp}°C ±{temp_spread} "
+                f"| confidence={consensus['confidence']}%"
+            )
+
+            for bracket in event.get("brackets", []):
+                if not self._passes_market_filter(bracket):
+                    continue
+
+                weather_prob = self._bracket_probability(bracket, avg_temp, temp_spread)
+                if weather_prob is None:
+                    continue
+
+                signal = self._build_signal(
+                    market       = bracket,
+                    weather_prob = weather_prob,
+                    consensus    = consensus,
+                    target_date  = target_date,
+                    signal_type  = "weather_temperature_bracket",
+                    location     = location,
+                    extra        = {
+                        "bracket_label":     bracket.get("group_title", ""),
+                        "event_title":       title,
+                        "event_url":         event.get("url", ""),
+                        "forecast_temp":     avg_temp,
+                        "resolution_source": event.get("resolution_source", ""),
+                    }
+                )
                 if signal:
                     signals.append(signal)
-            
-            return signals
-            
+
         except Exception as e:
-            logger.error(f"Error analyzing {location}: {e}")
-            return []
-    
-    def _analyze_market(self, market: Dict, forecast: Dict) -> Optional[Dict]:
-        """
-        Analyze single market vs forecast
-        
-        Returns signal if arbitrage found, else None
-        """
+            logger.error(f"Error _analyze_bracket {event.get('title')}: {e}")
+
+        return signals
+
+    # ── Probability helpers ────────────────────────────────────────────────────
+
+    def _bracket_probability(
+        self, bracket: Dict, forecast_temp: float, temp_spread: float
+    ) -> Optional[float]:
+        import math
+
+        label   = bracket.get("group_title", "").lower()
+        # FIX: pakai TEMP_STD_DEV minimum (2.5), bukan temp_spread yang bisa kecil
+        std_dev = max(temp_spread, self.TEMP_STD_DEV)
+
+        def norm_cdf(x):
+            return 0.5 * (1 + math.erf(x / (std_dev * math.sqrt(2))))
+
         try:
-            # Extract location from market question
-            location = self.polymarket.extract_location_from_question(
-                market['question']
-            )
-            
-            # Extract target date
-            target_date = self.polymarket.extract_date_from_question(
-                market['question']
-            )
-            
-            if not target_date:
-                # Try to use market end date
-                if market['end_date']:
-                    target_date = market['end_date'].strftime('%Y-%m-%d')
-                else:
-                    return None
-            
-            # Find matching forecast
-            matching_forecast = None
-            for period in forecast['forecasts']:
-                if period['date'] == target_date:
-                    matching_forecast = period
-                    break
-            
-            if not matching_forecast:
+            nums = re.findall(r"[\d.]+", label)
+            if not nums:
                 return None
-            
-            # Check if it's a rain market
-            question_lower = market['question'].lower()
-            is_rain_market = 'rain' in question_lower or 'precipitation' in question_lower
-            
-            if not is_rain_market:
-                return None  # Only handle rain markets for now
-            
-            # Get NOAA probability
-            noaa_prob = matching_forecast['rain_probability'] / 100  # Convert to 0-1
-            
-            # Get market probability
-            market_prob = market['yes_price']
-            
-            # Calculate edge
-            edge = abs(noaa_prob - market_prob)
-            edge_percent = edge * 100
-            
-            # Determine direction
-            if noaa_prob > market_prob:
-                direction = 'YES'
-                recommended_prob = noaa_prob
-                fair_value = noaa_prob
+            threshold = float(nums[0])
+
+            if "or below" in label or "≤" in label:
+                prob = norm_cdf(threshold + 0.5 - forecast_temp)
+            elif "or higher" in label or "≥" in label or "above" in label:
+                prob = 1 - norm_cdf(threshold - 0.5 - forecast_temp)
             else:
-                direction = 'NO'
-                recommended_prob = 1 - noaa_prob
-                fair_value = 1 - noaa_prob
-            
-            # Calculate expected value
-            if direction == 'YES':
-                payout_multiplier = 1 / market['yes_price'] if market['yes_price'] > 0 else 2
-                expected_value = (noaa_prob * payout_multiplier) - 1
-            else:
-                payout_multiplier = 1 / market['no_price'] if market['no_price'] > 0 else 2
-                expected_value = ((1 - noaa_prob) * payout_multiplier) - 1
-            
-            # Calculate confidence
-            confidence = self._calculate_confidence(
-                edge_percent,
-                matching_forecast,
-                market
-            )
-            
-            # Only return if edge is significant
-            if edge_percent < 10:  # Min 10% edge
-                return None
-            
-            return {
-                'market_id': market['id'],
-                'market_question': market['question'],
-                'market_url': market['url'],
-                'location': location or forecast['location'],
-                'target_date': target_date,
-                'signal_type': 'weather_rain',
-                'direction': direction,
-                'noaa_probability': noaa_prob * 100,
-                'market_probability': market_prob * 100,
-                'edge': edge_percent,
-                'confidence': confidence,
-                'fair_value': fair_value,
-                'current_price': market_prob if direction == 'YES' else market['no_price'],
-                'expected_value': expected_value * 100,
-                'recommended_bet': 0,  # Will be calculated by risk manager
-                'reasoning': self._generate_reasoning(
-                    noaa_prob, market_prob, matching_forecast, direction
-                ),
-                'market_volume': market['volume'],
-                'market_liquidity': market['liquidity'],
-                'market_end_date': market['end_date'],
-                'forecast_conditions': matching_forecast['conditions'],
-                'created_at': datetime.utcnow()
-            }
-            
-        except Exception as e:
-            logger.error(f"Error analyzing market {market.get('id')}: {e}")
+                prob = (
+                    norm_cdf(threshold + 0.5 - forecast_temp) -
+                    norm_cdf(threshold - 0.5 - forecast_temp)
+                )
+            return round(max(0.001, min(0.999, prob)), 4)
+        except (ValueError, IndexError):
             return None
-    
-    def _calculate_confidence(self, edge: float, forecast: Dict, market: Dict) -> float:
+
+    # Std dev untuk kalkulasi probabilitas suhu.
+    # 2.5°C lebih realistis dari 1.5°C:
+    # - diff 0.2°C: std 1.5 → 99.7%, std 2.5 → 15.8%
+    # - diff 1.0°C: std 1.5 → 92.3%, std 2.5 → 14.6%
+    TEMP_STD_DEV = 2.5
+
+    def _norm_cdf(self, x: float) -> float:
+        import math
+        return 0.5 * (1 + math.erf(x / (self.TEMP_STD_DEV * math.sqrt(2))))
+
+    def _estimate_temp_probability(self, question: str, consensus: Dict) -> Optional[float]:
         """
-        Calculate confidence score (0-100)
-        
-        Based on:
-        - Edge size
-        - Forecast certainty
-        - Market liquidity
-        - Time to event
+        Hitung probabilitas untuk binary temperature market.
+        Formula bracket dari test_analysis.py v4 (tested, lebih realistis).
+
+        Pattern yang didukung:
+          - "be 28°C on"         → bracket [27.5, 28.5]
+          - "28°C or higher"     → CDF >= threshold
+          - "28°C or below"      → CDF <= threshold
+          - "between 27-28°C"    → bracket [27, 28]
+          - Fahrenheit (semua pattern di atas)
         """
-        confidence = 50  # Base
-        
-        # Edge contribution (max +30)
-        if edge > 30:
-            confidence += 30
-        elif edge > 20:
-            confidence += 20
-        elif edge > 10:
-            confidence += 10
-        
-        # Forecast certainty (max +20)
-        rain_prob = forecast['rain_probability']
-        if rain_prob > 80 or rain_prob < 20:
-            confidence += 20  # Very certain
-        elif rain_prob > 70 or rain_prob < 30:
-            confidence += 10  # Fairly certain
-        
-        # Market liquidity (max +10)
-        if market['liquidity'] > 10000:
-            confidence += 10
-        elif market['liquidity'] > 5000:
-            confidence += 5
-        
-        return min(confidence, 95)  # Cap at 95%
-    
-    def _generate_reasoning(self, noaa_prob: float, market_prob: float,
-                           forecast: Dict, direction: str) -> str:
-        """Generate human-readable reasoning"""
-        
-        noaa_pct = noaa_prob * 100
-        market_pct = market_prob * 100
-        edge = abs(noaa_pct - market_pct)
-        
-        reasoning = f"NOAA forecasts {noaa_pct:.0f}% rain probability "
-        reasoning += f"while Polymarket prices {market_pct:.0f}%. "
-        reasoning += f"Edge: {edge:.0f}%. "
-        reasoning += f"Forecast: {forecast['conditions']}. "
-        
-        if direction == 'YES':
-            reasoning += "Market significantly underpricing rain probability."
+        avg_temp = consensus.get("avg_temp_high")
+        if avg_temp is None:
+            return None
+
+        q = question
+
+        def f2c(f): return (f - 32) * 5 / 9
+
+        # ── Celsius patterns ──────────────────────────────────────────────────
+
+        # Exact °C: "be 28°C on"  → bracket [27.5, 28.5]
+        m = re.search(r"be\s+([\d.]+)°?C\s+on", q, re.IGNORECASE)
+        if m:
+            t = float(m.group(1))
+            return round(self._norm_cdf(t + 0.5 - avg_temp) - self._norm_cdf(t - 0.5 - avg_temp), 3)
+
+        # >= threshold °C
+        m = re.search(r"([\d.]+)°?C or higher", q, re.IGNORECASE)
+        if m:
+            return round(1 - self._norm_cdf(float(m.group(1)) - avg_temp), 3)
+
+        # <= threshold °C
+        m = re.search(r"([\d.]+)°?C or below", q, re.IGNORECASE)
+        if m:
+            return round(self._norm_cdf(float(m.group(1)) - avg_temp), 3)
+
+        # Between X-Y °C
+        m = re.search(r"between\s+([\d.]+)[-–]([\d.]+)°?C", q, re.IGNORECASE)
+        if m:
+            lo, hi = float(m.group(1)), float(m.group(2))
+            return round(self._norm_cdf(hi + 0.5 - avg_temp) - self._norm_cdf(lo - 0.5 - avg_temp), 3)
+
+        # ── Fahrenheit patterns ───────────────────────────────────────────────
+
+        # Exact °F: "be 82°F on"  → bracket [81.5, 82.5] → convert ke °C
+        m = re.search(r"be\s+([\d.]+)°?F\s+on", q, re.IGNORECASE)
+        if m:
+            t = f2c(float(m.group(1)))
+            return round(self._norm_cdf(t + 0.5 - avg_temp) - self._norm_cdf(t - 0.5 - avg_temp), 3)
+
+        # >= threshold °F
+        m = re.search(r"([\d.]+)°?F or higher", q, re.IGNORECASE)
+        if m:
+            t = f2c(float(m.group(1)))
+            return round(1 - self._norm_cdf(t - avg_temp), 3)
+
+        # <= threshold °F
+        m = re.search(r"([\d.]+)°?F or below", q, re.IGNORECASE)
+        if m:
+            t = f2c(float(m.group(1)))
+            return round(self._norm_cdf(t - avg_temp), 3)
+
+        # Between X-Y °F
+        m = re.search(r"between\s+([\d.]+)[-–]([\d.]+)°?F", q, re.IGNORECASE)
+        if m:
+            lo = f2c(float(m.group(1)))
+            hi = f2c(float(m.group(2)))
+            return round(self._norm_cdf(hi + 0.5 - avg_temp) - self._norm_cdf(lo - 0.5 - avg_temp), 3)
+
+        # Fallback: exceed/above/below dari q_lower
+        q_lower = q.lower()
+        match = re.search(r"([\d.]+)\s*[°]?\s*(c|f|celsius|fahrenheit)", q_lower)
+        if match:
+            threshold = float(match.group(1))
+            if match.group(2) in ("f", "fahrenheit"):
+                threshold = f2c(threshold)
+            if any(w in q_lower for w in ["exceed", "above", "over", "more than"]):
+                return round(1 - self._norm_cdf(threshold - avg_temp), 3)
+            elif any(w in q_lower for w in ["below", "under", "less than"]):
+                return round(self._norm_cdf(threshold - avg_temp), 3)
+
+        return None
+
+    # ── Market filter ──────────────────────────────────────────────────────────
+
+    def _passes_market_filter(self, market: Dict) -> bool:
+        min_vol   = config.get("min_market_volume",    float)
+        min_liq   = config.get("min_market_liquidity", float)
+        min_hours = config.get("min_time_left_hours",  float)
+        max_hours = config.get("max_time_left_hours",  float)
+
+        if market.get("volume", 0) < min_vol:
+            return False
+        if market.get("liquidity", 0) < min_liq:
+            return False
+        if not market.get("active", True):
+            return False
+        if not market.get("accepting_orders", True):
+            return False
+
+        end_date = market.get("end_date")
+        if end_date:
+            now = datetime.now(timezone.utc)
+            if end_date.tzinfo is None:
+                end_date = end_date.replace(tzinfo=timezone.utc)
+            hours_left = (end_date - now).total_seconds() / 3600
+            if hours_left < min_hours or hours_left > max_hours:
+                return False
+
+        return True
+
+    # ── Signal builder ─────────────────────────────────────────────────────────
+
+    def _build_signal(
+        self,
+        market:       Dict,
+        weather_prob: float,
+        consensus:    Dict,
+        target_date:  str,
+        signal_type:  str,
+        location:     str,
+        extra:        Dict = None,
+    ) -> Optional[Dict]:
+        """
+        Bangun signal dict.
+        Field names sesuai kolom tabel signals:
+          noaa_probability   = weather forecast prob (%)
+          market_probability = YES price di market (%)
+          fair_value         = harga wajar menurut kita
+        """
+        min_edge       = config.get("min_edge_pct",       float)
+        min_confidence = config.get("min_confidence_pct", float)
+
+        yes_price = market.get("yes_price", 0.5)
+        no_price  = market.get("no_price",  0.5)
+
+        if yes_price <= 0 or yes_price >= 1:
+            return None
+
+        market_prob = yes_price
+        edge        = (weather_prob - market_prob) * 100
+
+        if edge > 0:
+            direction     = "YES"
+            current_price = yes_price
+            payout_mult   = 1 / yes_price
+            ev            = (weather_prob * payout_mult - 1) * 100
         else:
-            reasoning += "Market significantly overpricing rain probability."
-        
-        return reasoning
+            direction     = "NO"
+            current_price = no_price
+            payout_mult   = 1 / no_price if no_price > 0 else 2
+            ev            = ((1 - weather_prob) * payout_mult - 1) * 100
+
+        abs_edge = abs(edge)
+
+        if abs_edge < min_edge:
+            return None
+
+        confidence = self._calculate_confidence(abs_edge, consensus, market)
+
+        if confidence < min_confidence:
+            return None
+
+        signal = {
+            # ── Kolom tabel signals ───────────────────────────────────────────
+            "market_id":          market.get("id", ""),
+            "location":           location,
+            "target_date":        target_date,
+            "signal_type":        signal_type,
+            "direction":          direction,
+            "noaa_probability":   round(weather_prob * 100, 1),   # ← nama kolom DB
+            "market_probability": round(market_prob  * 100, 1),   # ← nama kolom DB
+            "edge":               round(abs_edge, 1),
+            "confidence":         confidence,
+            "fair_value":         round(weather_prob, 4),          # ← nama kolom DB
+            "expected_value":     round(ev, 1),
+            "recommended_bet":    0,   # diisi oleh risk_manager
+            "reasoning":          self._generate_reasoning(
+                                      weather_prob, market_prob, consensus,
+                                      direction, signal_type
+                                  ),
+            # ── Extra fields untuk tampilan / Telegram ─────────────────────
+            "market_question":    market.get("question", ""),
+            "market_url":         market.get("url", ""),
+            "market_volume":      market.get("volume", 0),
+            "market_liquidity":   market.get("liquidity", 0),
+            "market_end_date":    market.get("end_date"),
+            "current_price":      current_price,
+            "payout_multiplier":  round(payout_mult, 2),
+            "edge_direction":     "YES underpriced" if edge > 0 else "NO underpriced",
+            "sources_used":       consensus.get("sources_used", []),
+            "source_count":       consensus.get("source_count", 1),
+            "temp_spread":        consensus.get("temp_spread", 0),
+            "created_at":         datetime.now(timezone.utc),
+        }
+
+        if extra:
+            signal.update(extra)
+
+        return signal
+
+    # ── Confidence ────────────────────────────────────────────────────────────
+
+    def _calculate_confidence(self, edge: float, consensus: Dict, market: Dict) -> float:
+        score = 0
+
+        if edge >= 30:   score += 25
+        elif edge >= 20: score += 18
+        elif edge >= 15: score += 12
+        else:            score += 6
+
+        source_count = consensus.get("source_count", 1)
+        temp_spread  = consensus.get("temp_spread", 99)
+        if source_count >= 2 and temp_spread < 2.0:   score += 25
+        elif source_count >= 2 and temp_spread < 4.0: score += 15
+        elif source_count >= 2:                        score += 8
+
+        avg_rain = consensus.get("avg_rain_prob")
+        if avg_rain is not None:
+            if avg_rain > 80 or avg_rain < 20:   score += 20
+            elif avg_rain > 70 or avg_rain < 30: score += 12
+            elif avg_rain > 60 or avg_rain < 40: score += 6
+
+        liquidity = market.get("liquidity", 0)
+        if liquidity > 10000:   score += 15
+        elif liquidity > 5000:  score += 10
+        elif liquidity > 1000:  score += 5
+
+        end_date = market.get("end_date")
+        if end_date:
+            now = datetime.now(timezone.utc)
+            if end_date.tzinfo is None:
+                end_date = end_date.replace(tzinfo=timezone.utc)
+            hours_left = (end_date - now).total_seconds() / 3600
+            if hours_left <= 6:    score += 15
+            elif hours_left <= 24: score += 10
+            elif hours_left <= 48: score += 5
+
+        return min(round(score, 1), 95)
+
+    # ── Reasoning ─────────────────────────────────────────────────────────────
+
+    def _generate_reasoning(
+        self, weather_prob, market_prob, consensus, direction, signal_type
+    ) -> str:
+        w_pct   = weather_prob * 100
+        m_pct   = market_prob  * 100
+        edge    = abs(w_pct - m_pct)
+        sources = ", ".join(consensus.get("sources_used", ["Unknown"]))
+
+        if "bracket" in signal_type:
+            temp   = consensus.get("avg_temp_high", "?")
+            spread = consensus.get("temp_spread", 0)
+            return (
+                f"Forecast suhu {temp}°C (±{spread}°C) dari {sources}. "
+                f"Model: {w_pct:.1f}% vs market: {m_pct:.1f}%. "
+                f"Edge {edge:.1f}% → {direction}."
+            )
+
+        suffix = "Market underpricing." if direction == "YES" else "Market overpricing."
+        return (
+            f"{sources} forecast {w_pct:.0f}% vs market {m_pct:.0f}%. "
+            f"Edge {edge:.0f}% → {direction}. {suffix}"
+        )

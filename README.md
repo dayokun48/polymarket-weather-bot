@@ -46,10 +46,17 @@ Bot fetches all active markets and filters by weather keywords with word-boundar
 ## 📁 Key Files
 
 ```
+<<<<<<< HEAD
 app.py                    ← Main application
 check_system.py           ← Pre-flight check 
 requirements.txt          ← Dependencies
 .env                      ← Credentials 
+=======
+app.py                    ← Main application (start here)
+check_system.py           ← Pre-flight check (run before app.py)
+requirements.txt          ← Dependencies
+.env                      ← Credentials (jangan di-commit ke git)
+>>>>>>> 57b167c (fix bug notification)
 ```
 
 ---
@@ -59,4 +66,8 @@ requirements.txt          ← Dependencies
 **Built by:** Dayo 
 **Version:** 2.0  
 **Date:** March 2026  
+<<<<<<< HEAD
 **Stack:** Python 3.12 · Flask · MySQL · APScheduler · Telegram Bot API
+=======
+**Stack:** Python 3.12 · Flask · MySQL · APScheduler · Telegram Bot API
+>>>>>>> 57b167c (fix bug notification)

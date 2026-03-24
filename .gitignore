@@ -35,3 +35,4 @@ docker-compose.override.yml
 *.bak
 
 check_system.py
+check_weather_markets.py
