@@ -62,12 +62,6 @@ requirements.txt          ← Dependencies
 ---
 
 ## 🔧 Development
-
 **Built by:** Dayo 
 **Version:** 2.0  
 **Date:** March 2026  
-<<<<<<< HEAD
-**Stack:** Python 3.12 · Flask · MySQL · APScheduler · Telegram Bot API
-=======
-**Stack:** Python 3.12 · Flask · MySQL · APScheduler · Telegram Bot API
->>>>>>> 57b167c (fix bug notification)
