@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Markets - Weather Trading Bot{% endblock %}
+{% block content %}
+<div class="markets-page">
+    <h2>🌤️ Weather Markets</h2>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">📊</div>
+            <div class="stat-content">
+                <div class="stat-label">Total Markets</div>
+                <div class="stat-value">{{ total }}</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">💰</div>
+            <div class="stat-content">
+                <div class="stat-label">Total Volume</div>
+                <div class="stat-value">${{ "{:,.0f}".format(total_vol) }}</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">💧</div>
+            <div class="stat-content">
+                <div class="stat-label">Total Liquidity</div>
+                <div class="stat-value">${{ "{:,.0f}".format(total_liq) }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="filters" style="margin: 1rem 0; display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
+        <form method="get" style="display:flex; gap:0.5rem; flex-wrap:wrap; width:100%;">
+            <input type="text" name="search" value="{{ search }}"
+                   placeholder="Search markets..."
+                   style="flex:1; min-width:200px; padding:8px 12px; border:1px solid #ddd; border-radius:6px;">
+            <select name="sort" onchange="this.form.submit()"
+                    style="padding:8px 12px; border:1px solid #ddd; border-radius:6px;">
+                <option value="volume"    {% if sort=='volume'    %}selected{% endif %}>Sort: Volume</option>
+                <option value="liquidity" {% if sort=='liquidity' %}selected{% endif %}>Sort: Liquidity</option>
+                <option value="end_date"  {% if sort=='end_date'  %}selected{% endif %}>Sort: Closing Soon</option>
+                <option value="newest"    {% if sort=='newest'    %}selected{% endif %}>Sort: Newest</option>
+            </select>
+            <button type="submit" style="padding:8px 16px; background:#667eea; color:white; border:none; border-radius:6px; cursor:pointer;">
+                Search
+            </button>
+        </form>
+    </div>
+
+    <div style="font-size:13px; color:#666; margin-bottom:0.5rem;">
+        Showing {{ markets|length }} of {{ total }} markets
+        (page {{ page }}/{{ total_pages }})
+    </div>
+
+    <table style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead>
+            <tr style="background:#f5f5f5; text-align:left;">
+                <th style="padding:10px 8px; border-bottom:2px solid #ddd;">Market</th>
+                <th style="padding:10px 8px; border-bottom:2px solid #ddd; white-space:nowrap;">Volume</th>
+                <th style="padding:10px 8px; border-bottom:2px solid #ddd; white-space:nowrap;">Liquidity</th>
+                <th style="padding:10px 8px; border-bottom:2px solid #ddd; white-space:nowrap;">Closes</th>
+                <th style="padding:10px 8px; border-bottom:2px solid #ddd;">Link</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in markets %}
+            <tr style="border-bottom:1px solid #eee;">
+                <td style="padding:8px; max-width:500px;">
+                    {{ (m.question or '')[:100] }}{% if (m.question or '')|length > 100 %}...{% endif %}
+                </td>
+                <td style="padding:8px; white-space:nowrap;">${{ "{:,.0f}".format(m.volume or 0) }}</td>
+                <td style="padding:8px; white-space:nowrap;">${{ "{:,.0f}".format(m.liquidity or 0) }}</td>
+                <td style="padding:8px; white-space:nowrap;">
+                    {% if m.end_date %}{{ m.end_date.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
+                </td>
+                <td style="padding:8px;">
+                    {% if m.url %}
+                    <a href="{{ m.url }}" target="_blank"
+                       style="color:#667eea; text-decoration:none;">View →</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if total_pages > 1 %}
+    <div style="display:flex; gap:0.5rem; margin-top:1rem; justify-content:center;">
+        {% if page > 1 %}
+        <a href="?page={{ page-1 }}&search={{ search }}&sort={{ sort }}"
+           style="padding:6px 12px; border:1px solid #ddd; border-radius:4px; text-decoration:none; color:#333;">
+            ← Prev
+        </a>
+        {% endif %}
+        <span style="padding:6px 12px; background:#667eea; color:white; border-radius:4px;">
+            {{ page }} / {{ total_pages }}
+        </span>
+        {% if page < total_pages %}
+        <a href="?page={{ page+1 }}&search={{ search }}&sort={{ sort }}"
+           style="padding:6px 12px; border:1px solid #ddd; border-radius:4px; text-decoration:none; color:#333;">
+            Next →
+        </a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
