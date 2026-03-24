@@ -46,10 +46,10 @@ Bot fetches all active markets and filters by weather keywords with word-boundar
 ## 📁 Key Files
 
 ```
-app.py                    ← Main application (start here)
-check_system.py           ← Pre-flight check (run before app.py)
+app.py                    ← Main application
+check_system.py           ← Pre-flight check 
 requirements.txt          ← Dependencies
-.env                      ← Credentials (jangan di-commit ke git)
+.env                      ← Credentials 
 ```
 
 ---
