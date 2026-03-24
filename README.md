@@ -1,62 +1,62 @@
 # 🌧️ Polymarket Weather Trading Bot
 
 Automated weather arbitrage trading bot for Polymarket prediction markets.
+Detects timing delays between weather API updates and market odds for asymmetric payoffs.
 
-## Features
+---
 
-- ✅ NOAA weather data integration
-- ✅ Real-time Polymarket market monitoring
-- ✅ Arbitrage opportunity detection
-- ✅ Telegram alerts with execute buttons
-- ✅ Semi-auto and full-auto modes
-- ✅ Risk management system
-- ✅ Web dashboard
+## ✨ Features
 
-## Quick Start
+- ✅ Multi-source weather data (NOAA for US, Open-Meteo global, Wunderground verification)
+- ✅ Keyword-based market filtering (tag=weather API confirmed broken — fixed)
+- ✅ Temperature probability with bracket formula (realistic, not gaussian peak)
+- ✅ Arbitrage opportunity detection with Kelly Criterion position sizing
+- ✅ Telegram alerts with EXECUTE / SKIP buttons
+- ✅ Semi-auto and full-auto trading modes
+- ✅ Risk management (daily loss limit, consecutive loss auto-pause)
+- ✅ Web dashboard (markets, signals, positions, performance, settings)
+- ✅ MySQL database with 6-table schema
+- ✅ Hot-reload settings via phpMyAdmin (no restart needed)
 
-1. **Configure credentials:**
-```bash
-   cp .env.example .env
-   nano .env  # Add your credentials
+---
+
+## 🌤️ Weather API Strategy
+
+| Source | Coverage | Usage |
+|--------|----------|-------|
+| **NOAA** | US only | Primary for US cities (official, accurate) |
+| **Open-Meteo** | Global | Primary for non-US, fallback for US |
+| **Wunderground** | Global | Resolution verification only |
+
+Note: Polymarket `tag=weather` API confirmed broken (returns random markets).
+Bot fetches all active markets and filters by weather keywords with word-boundary regex.
+
+---
+
+## 🛡️ Safety
+
+- Mulai dengan modal kecil ($100–500) dan mode `semi-auto`
+- Setiap signal butuh approval via Telegram sebelum dieksekusi
+- Auto-pause setelah 3 loss berturut-turut
+- Daily loss limit otomatis menghentikan trading
+- Semua trade tersimpan ke database untuk audit
+
+---
+
+## 📁 Key Files
+
+```
+app.py                    ← Main application (start here)
+check_system.py           ← Pre-flight check (run before app.py)
+requirements.txt          ← Dependencies
+.env                      ← Credentials (jangan di-commit ke git)
 ```
 
-2. **Deploy:**
-```bash
-   docker-compose up -d --build
-```
+---
 
-3. **Access:**
-   - your own
+## 🔧 Development
 
-## Configuration
-
-Edit `.env` file:
-- Telegram bot token & chat ID
-- Polymarket wallet address & private key
-- Risk management parameters
-
-## Architecture
-```
-Bot runs every 2 hours:
-1. Fetch NOAA weather forecasts
-2. Fetch Polymarket weather markets
-3. Calculate arbitrage opportunities
-4. Send Telegram alerts
-5. Execute trades (semi-auto: wait for approval)
-6. Track positions
-7. Report results
-```
-
-## Safety
-
-- Start with small capital ($100-500)
-- Use semi-auto mode initially
-- Monitor daily performance
-- Adjust risk parameters as needed
-
-## Development
-
-Built by: Dayo 
-Location: Jakarta, Indonesia
-Version: 1.0
-Date: March 2026
+**Built by:** Dayo 
+**Version:** 2.0  
+**Date:** March 2026  
+**Stack:** Python 3.12 · Flask · MySQL · APScheduler · Telegram Bot API
