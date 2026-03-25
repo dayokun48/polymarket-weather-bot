@@ -4,10 +4,14 @@ noaa_collector.py
 Weather data collector dengan multiple sources:
 
   US cities    → NOAA (api.weather.gov) — resmi, akurat, free
-  Global       → Open-Meteo (ECMWF/GFS) — free, no key, global
-  Verifikasi   → Wunderground scraping   — sama dengan sumber resolusi Polymarket
+  Global       → Open-Meteo ECMWF — lebih akurat dari GFS, free
+  Global       → Tomorrow.io — spesialis hourly, free 500/hari
+  Verifikasi   → Wunderground scraping — sama dengan sumber resolusi Polymarket
 
 Tambahan vs sebelumnya:
+  - Open-Meteo ECMWF model (lebih akurat dari GFS default)
+  - Tomorrow.io sebagai source ke-3
+  - get_consensus() gabungkan 3 sources → confidence lebih tinggi
   - save_forecast_to_db() untuk simpan forecast ke tabel weather_forecasts
 """
 
@@ -126,7 +130,7 @@ class _OpenMeteoSource:
     def __init__(self, session: requests.Session):
         self.session = session
 
-    def get_forecast(self, lat: float, lon: float, tz: str = "auto") -> Optional[List[Dict]]:
+    def get_forecast(self, lat: float, lon: float, tz: str = "auto", model: str = None) -> Optional[List[Dict]]:
         params = {
             "latitude":   lat, "longitude":  lon, "timezone":   tz,
             "forecast_days": 7,
@@ -140,6 +144,9 @@ class _OpenMeteoSource:
             "wind_speed_unit":    "kmh",
             "precipitation_unit": "mm",
         }
+        # ECMWF model lebih akurat dari GFS default
+        if model:
+            params["models"] = model
         try:
             r = self.session.get(config.OPEN_METEO_API, params=params, timeout=15)
             r.raise_for_status()
@@ -186,6 +193,77 @@ class _OpenMeteoSource:
                 "hourly_temps":      day_hours,
                 "source":            "Open-Meteo",
             })
+        return forecasts
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TOMORROW.IO SOURCE (Global, 500 calls/day free)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _TomorrowIOSource:
+    """
+    Tomorrow.io weather API — spesialis hourly forecast, akurat untuk Asia.
+    Free tier: 500 calls/hari, cukup untuk bot.
+    Daftar di: tomorrow.io/try-the-api
+    """
+
+    BASE_URL = "https://api.tomorrow.io/v4/weather/forecast"
+
+    def __init__(self, session: requests.Session):
+        self.session = session
+
+    def get_forecast(self, lat: float, lon: float) -> Optional[List[Dict]]:
+        api_key = config.TOMORROW_IO_API_KEY
+        if not api_key or api_key == "-":
+            return None
+
+        try:
+            r = self.session.get(
+                self.BASE_URL,
+                params={
+                    "location":  f"{lat},{lon}",
+                    "apikey":    api_key,
+                    "units":     "metric",
+                    "fields":    "temperatureMax,temperatureMin,precipitationProbability",
+                    "timesteps": "1d",
+                },
+                timeout=10,
+            )
+            r.raise_for_status()
+            return self._parse(r.json())
+        except Exception as e:
+            logger.error(f"Tomorrow.io fetch error ({lat},{lon}): {e}")
+            return None
+
+    def _parse(self, raw: dict) -> List[Dict]:
+        forecasts = []
+        try:
+            timelines = raw.get("timelines", {}).get("daily", [])
+            for item in timelines:
+                date    = item["time"][:10]
+                values  = item.get("values", {})
+                temp_max = values.get("temperatureMax")
+                temp_min = values.get("temperatureMin")
+                rain_p   = values.get("precipitationProbability", 0)
+
+                forecasts.append({
+                    "date":              date,
+                    "rain_probability":  rain_p,
+                    "temperature_high":  temp_max,
+                    "temperature_low":   temp_min,
+                    "temp_high_celsius": temp_max,
+                    "temp_low_celsius":  temp_min,
+                    "hourly_max":        temp_max,
+                    "peak_hour":         "N/A",
+                    "precip_mm":         0.0,
+                    "wind_speed_max":    0.0,
+                    "wmo_code":          None,
+                    "conditions":        "Tomorrow.io",
+                    "hourly_temps":      [],
+                    "source":            "Tomorrow.io",
+                })
+        except Exception as e:
+            logger.error(f"Tomorrow.io parse error: {e}")
         return forecasts
 
 
@@ -239,9 +317,11 @@ class NOAACollector:
     Weather collector dengan multi-source, consensus, dan DB persistence.
 
     Routing:
-      US coordinates  → NOAA + Open-Meteo
-      Non-US          → Open-Meteo
+      US coordinates  → NOAA + Open-Meteo ECMWF + Tomorrow.io
+      Non-US          → Open-Meteo ECMWF + Tomorrow.io
       Verifikasi      → Wunderground scraping
+
+    3 sources → confidence lebih tinggi dan lebih konsisten.
     """
 
     def __init__(self):
@@ -249,6 +329,7 @@ class NOAACollector:
         self.session.headers.update({"User-Agent": "PolymarketWeatherBot/2.0"})
         self._noaa         = _NOAASource(self.session)
         self._openmeteo    = _OpenMeteoSource(self.session)
+        self._tomorrowio   = _TomorrowIOSource(self.session)
         self._wunderground = _WundergroundScraper(self.session)
 
     # ── Geocoding ──────────────────────────────────────────────────────────────
@@ -315,13 +396,22 @@ class NOAACollector:
     # ── Consensus ──────────────────────────────────────────────────────────────
 
     def get_consensus(self, location: str, target_date: str) -> Optional[Dict]:
+        """
+        Ambil consensus dari semua sources yang tersedia.
+        Semakin banyak source sepakat → confidence lebih tinggi.
+
+        Sources:
+          US:     NOAA + Open-Meteo ECMWF + Tomorrow.io (max 3)
+          Global: Open-Meteo ECMWF + Tomorrow.io (max 2)
+        """
         lat, lon, tz = self.get_coordinates(location)
         if lat == 0.0 and lon == 0.0:
             return None
 
         sources  = []
-        is_us    = _is_us_location(lat, lon)
+        is_us    = _is_us_location(lat, lon, location)
 
+        # Source 1: NOAA (US only)
         if is_us:
             noaa = self._noaa.get_forecast(lat, lon)
             if noaa:
@@ -329,11 +419,28 @@ class NOAACollector:
                 if day:
                     sources.append(day)
 
-        om = self._openmeteo.get_forecast(lat, lon, tz)
+        # Source 2: Open-Meteo ECMWF (lebih akurat dari GFS default)
+        om = self._openmeteo.get_forecast(lat, lon, tz, model="ecmwf_ifs025")
         if om:
             day = next((d for d in om if d["date"] == target_date), None)
             if day:
+                day["source"] = "Open-Meteo ECMWF"
                 sources.append(day)
+        else:
+            # Fallback ke GFS kalau ECMWF tidak tersedia
+            om_gfs = self._openmeteo.get_forecast(lat, lon, tz)
+            if om_gfs:
+                day = next((d for d in om_gfs if d["date"] == target_date), None)
+                if day:
+                    sources.append(day)
+
+        # Source 3: Tomorrow.io (kalau API key tersedia)
+        if config.TOMORROW_IO_API_KEY and config.TOMORROW_IO_API_KEY != "-":
+            tio = self._tomorrowio.get_forecast(lat, lon)
+            if tio:
+                day = next((d for d in tio if d["date"] == target_date), None)
+                if day:
+                    sources.append(day)
 
         if not sources:
             return None
@@ -349,10 +456,15 @@ class NOAACollector:
         avg_rain    = round(sum(rains) / len(rains), 1) if rains else None
         temp_spread = round(max(temps) - min(temps), 1) if len(temps) > 1 else 0.0
 
-        if len(sources) >= 2 and temp_spread < 2.0:   confidence = 80
-        elif len(sources) >= 2 and temp_spread < 4.0: confidence = 65
-        elif len(sources) >= 2:                        confidence = 50
-        else:                                          confidence = 60
+        # Confidence scoring: lebih banyak source + lebih sepakat = lebih tinggi
+        n = len(sources)
+        if n >= 3 and temp_spread < 1.5:   confidence = 90
+        elif n >= 3 and temp_spread < 3.0: confidence = 80
+        elif n >= 3:                        confidence = 70
+        elif n >= 2 and temp_spread < 2.0: confidence = 75
+        elif n >= 2 and temp_spread < 4.0: confidence = 65
+        elif n >= 2:                        confidence = 55
+        else:                               confidence = 50
 
         return {
             "location":      location,
