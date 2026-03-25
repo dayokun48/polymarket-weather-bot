@@ -1,107 +1,153 @@
 {% extends "base.html" %}
-{% block title %}Dashboard - Weather Trading Bot{% endblock %}
+{% block title %}Dashboard — WeatherBot{% endblock %}
+{% block page_title %}Dashboard Overview{% endblock %}
 {% block content %}
-<div class="dashboard">
-    <h2>📊 Dashboard Overview</h2>
 
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-icon">📊</div>
-            <div class="stat-content">
-                <div class="stat-label">Signals Today</div>
-                <div class="stat-value">{{ total_signals_today }}</div>
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon">📈</div>
-            <div class="stat-content">
-                <div class="stat-label">Open Positions</div>
-                <div class="stat-value">{{ total_open_positions }}</div>
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon">💰</div>
-            <div class="stat-content">
-                <div class="stat-label">Total Exposure</div>
-                <div class="stat-value">${{ "%.2f"|format(total_exposure) }}</div>
-            </div>
-        </div>
-        <div class="stat-card {% if total_pnl > 0 %}positive{% else %}negative{% endif %}">
-            <div class="stat-icon">💵</div>
-            <div class="stat-content">
-                <div class="stat-label">Total P&L</div>
-                <div class="stat-value">${{ "%+.2f"|format(total_pnl) }}</div>
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon">🎯</div>
-            <div class="stat-content">
-                <div class="stat-label">Win Rate</div>
-                <div class="stat-value">{{ "%.1f"|format(win_rate) }}%</div>
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon">📝</div>
-            <div class="stat-content">
-                <div class="stat-label">Total Trades</div>
-                <div class="stat-value">{{ total_trades }}</div>
-            </div>
-        </div>
-    </div>
-
-    <div class="dashboard-sections">
-        <div class="section">
-            <h3>🔔 Recent Signals (Last 24h)</h3>
-            {% if recent_signals %}
-            <div class="signals-list">
-                {% for signal in recent_signals %}
-                <div class="signal-item">
-                    <div class="signal-header">
-                        <span class="signal-location">📍 {{ signal.location }}</span>
-                        <span class="signal-edge">+{{ "%.0f"|format(signal.edge) }}% edge</span>
-                    </div>
-                    <!-- FIX: signal.market.question → signal.market_question (dict dari pymysql) -->
-                    <div class="signal-market">{{ (signal.market_question or '')[:80] }}...</div>
-                    <div class="signal-footer">
-                        <span class="signal-direction {{ signal.direction.lower() }}">{{ signal.direction }}</span>
-                        <span class="signal-confidence">{{ "%.0f"|format(signal.confidence) }}% confidence</span>
-                        <span class="signal-time">
-                            {% if signal.created_at %}
-                                {{ signal.created_at.strftime('%H:%M') }}
-                            {% endif %}
-                        </span>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="empty-state">No signals in the last 24 hours</p>
-            {% endif %}
-        </div>
-
-        <div class="section">
-            <h3>📈 Open Positions</h3>
-            {% if open_trades %}
-            <div class="positions-list">
-                {% for trade in open_trades %}
-                <div class="position-item">
-                    <div class="position-header">
-                        <span class="position-direction {{ trade.direction.lower() }}">{{ trade.direction }}</span>
-                        <span class="position-amount">${{ "%.2f"|format(trade.bet_size) }}</span>
-                    </div>
-                    <!-- FIX: trade.market.question → trade.market_question -->
-                    <div class="position-market">{{ (trade.market_question or '')[:80] }}...</div>
-                    <div class="position-footer">
-                        <span>Entry: {{ "%.4f"|format(trade.entry_price) }}</span>
-                        <span>Shares: {{ "%.2f"|format(trade.shares) }}</span>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="empty-state">No open positions</p>
-            {% endif %}
-        </div>
-    </div>
+<!-- KPI row -->
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-label">Signals Today</div>
+    <div class="kpi-value">{{ total_signals_today }}</div>
+    <div class="kpi-sub">alerts sent</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Open Positions</div>
+    <div class="kpi-value">{{ total_open_positions }}</div>
+    <div class="kpi-sub">${{ "%.2f"|format(total_exposure) }} exposure</div>
+  </div>
+  <div class="kpi-card {% if total_pnl >= 0 %}green{% else %}red{% endif %}">
+    <div class="kpi-label">Total P&L</div>
+    <div class="kpi-value {% if total_pnl >= 0 %}green{% else %}red{% endif %}">${{ "%+.2f"|format(total_pnl) }}</div>
+    <div class="kpi-sub">realized</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Win Rate</div>
+    <div class="kpi-value {% if win_rate >= 50 %}green{% else %}red{% endif %}">{{ "%.1f"|format(win_rate) }}%</div>
+    <div class="kpi-sub">{{ total_trades }} total trades</div>
+  </div>
 </div>
+
+<!-- Two columns -->
+<div class="two-col">
+
+  <!-- Recent Signals -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">🔔 Recent Signals (24h)</span>
+      <a href="{{ url_for('signals.list_signals') }}" style="font-size:11px;color:var(--blue);text-decoration:none;">View all →</a>
+    </div>
+    {% if recent_signals %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Market</th>
+          <th>Dir</th>
+          <th>Edge</th>
+          <th>Conf</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in recent_signals %}
+        <tr>
+          <td class="td-market td-primary">{{ (s.market_question or s.location or '')[:40] }}...</td>
+          <td>
+            <span class="badge badge-{{ s.direction.lower() if s.direction else 'no' }}">
+              {{ s.direction or '—' }}
+            </span>
+          </td>
+          <td class="td-mono positive">+{{ "%.0f"|format(s.edge or 0) }}%</td>
+          <td class="td-mono">{{ "%.0f"|format(s.confidence or 0) }}%</td>
+          <td class="td-mono" style="font-size:11px;color:var(--text-muted)">
+            {% if s.created_at %}{{ s.created_at.strftime('%H:%M') }}{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon">📭</div>No signals in last 24 hours</div>
+    {% endif %}
+  </div>
+
+  <!-- Open Positions -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">📈 Open Positions</span>
+      <a href="{{ url_for('positions.list_positions') }}" style="font-size:11px;color:var(--blue);text-decoration:none;">View all →</a>
+    </div>
+    {% if open_trades %}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Market</th>
+          <th>Dir</th>
+          <th>Amount</th>
+          <th>Entry</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in open_trades %}
+        <tr>
+          <td class="td-market td-primary">{{ (t.market_question or '')[:40] }}...</td>
+          <td>
+            <span class="badge badge-{{ t.direction.lower() if t.direction else 'no' }}">
+              {{ t.direction or '—' }}
+            </span>
+          </td>
+          <td class="td-mono">${{ "%.2f"|format(t.bet_size or 0) }}</td>
+          <td class="td-mono" style="color:var(--text-muted)">{{ "%.4f"|format(t.entry_price or 0) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon">🔒</div>No open positions</div>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- Recent Trades -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-title">🕐 Recent Trades</span>
+    <a href="{{ url_for('positions.list_positions') }}" style="font-size:11px;color:var(--blue);text-decoration:none;">View all →</a>
+  </div>
+  {% if recent_trades %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Market</th>
+        <th>Direction</th>
+        <th>Amount</th>
+        <th>Entry</th>
+        <th>Status</th>
+        <th>P&L</th>
+        <th>Executed</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in recent_trades %}
+      <tr>
+        <td class="td-market td-primary">{{ (t.market_question or '')[:50] }}...</td>
+        <td><span class="badge badge-{{ t.direction.lower() if t.direction else 'no' }}">{{ t.direction or '—' }}</span></td>
+        <td class="td-mono">${{ "%.2f"|format(t.bet_size or 0) }}</td>
+        <td class="td-mono" style="color:var(--text-muted)">{{ "%.4f"|format(t.entry_price or 0) }}</td>
+        <td><span class="badge badge-{{ t.status or 'open' }}">{{ t.status or 'open' }}</span></td>
+        <td class="td-mono {% if (t.realized_pnl or 0) > 0 %}positive{% elif (t.realized_pnl or 0) < 0 %}negative{% endif %}">
+          {% if t.realized_pnl is not none %}${{ "%+.2f"|format(t.realized_pnl) }}{% else %}—{% endif %}
+        </td>
+        <td class="td-mono" style="font-size:11px;color:var(--text-muted)">
+          {% if t.executed_at %}{{ t.executed_at.strftime('%m/%d %H:%M') }}{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><div class="empty-icon">📋</div>No recent trades</div>
+  {% endif %}
+</div>
+
 {% endblock %}

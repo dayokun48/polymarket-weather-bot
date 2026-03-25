@@ -1,37 +1,105 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Weather Trading Bot{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Weather Trading Bot{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <nav class="navbar">
-        <div class="nav-brand">
-            <h1>🌧️ Weather Trading Bot</h1>
-        </div>
-        <div class="nav-menu">
-            <a href="{{ url_for('overview.index') }}"            class="nav-link">Dashboard</a>
-            <a href="{{ url_for('markets.list_markets') }}"      class="nav-link">Markets</a>
-            <a href="{{ url_for('signals.list_signals') }}"      class="nav-link">Signals</a>
-            <a href="{{ url_for('positions.list_positions') }}"  class="nav-link">Positions</a>
-            <a href="{{ url_for('performance.show_performance') }}" class="nav-link">Performance</a>
-            <a href="{{ url_for('settings.manage_settings') }}"  class="nav-link">Settings</a>
-        </div>
-    </nav>
-    <div class="container">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-        {% block content %}{% endblock %}
+
+<!-- ── Sidebar ───────────────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <a href="{{ url_for('overview.index') }}" class="logo">
+      <div class="logo-icon">🌧️</div>
+      <div>
+        <div class="logo-text">WeatherBot</div>
+        <div class="logo-sub">Trading System</div>
+      </div>
+    </a>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-section-label">Monitor</div>
+    <a href="{{ url_for('overview.index') }}"
+       class="nav-link {% if request.endpoint == 'overview.index' %}active{% endif %}">
+      <span class="nav-icon">📊</span> Dashboard
+    </a>
+    <a href="{{ url_for('signals.list_signals') }}"
+       class="nav-link {% if request.endpoint == 'signals.list_signals' %}active{% endif %}">
+      <span class="nav-icon">🔔</span> Signals
+    </a>
+    <a href="{{ url_for('markets.list_markets') }}"
+       class="nav-link {% if request.endpoint == 'markets.list_markets' %}active{% endif %}">
+      <span class="nav-icon">🌤️</span> Markets
+    </a>
+
+    <div class="nav-section-label" style="margin-top:8px;">Trading</div>
+    <a href="{{ url_for('positions.list_positions') }}"
+       class="nav-link {% if request.endpoint == 'positions.list_positions' %}active{% endif %}">
+      <span class="nav-icon">📈</span> Positions
+    </a>
+    <a href="{{ url_for('performance.show_performance') }}"
+       class="nav-link {% if request.endpoint == 'performance.show_performance' %}active{% endif %}">
+      <span class="nav-icon">🏆</span> Performance
+    </a>
+
+    <div class="nav-section-label" style="margin-top:8px;">System</div>
+    <a href="{{ url_for('settings.manage_settings') }}"
+       class="nav-link {% if request.endpoint == 'settings.manage_settings' %}active{% endif %}">
+      <span class="nav-icon">⚙️</span> Settings
+    </a>
+    <a href="/api/trigger-scan" class="nav-link">
+      <span class="nav-icon">🔄</span> Trigger Scan
+    </a>
+    <a href="/health" class="nav-link">
+      <span class="nav-icon">💚</span> Health
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="bot-status">
+      <span class="status-dot"></span>
+      <span>Bot Running</span>
     </div>
-    <footer>
-        <p>Weather Trading Bot v1.0 | Built by Dayo | Jakarta, Indonesia</p>
-    </footer>
+  </div>
+</aside>
+
+<!-- ── Main ──────────────────────────────────────────────────── -->
+<div class="main">
+  <header class="topbar">
+    <span class="topbar-title">{% block page_title %}Dashboard{% endblock %}</span>
+    <div class="topbar-right">
+      <span id="clock">--:--:--</span>
+      <span style="color:var(--border-light)">|</span>
+      <span style="color:var(--blue)">WIB</span>
+    </div>
+  </header>
+
+  <div class="page-content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </div>
+</div>
+
+<script>
+// Live clock WIB (UTC+7)
+function updateClock() {
+  const now = new Date();
+  const wib = new Date(now.getTime() + (7 * 60 * 60 * 1000));
+  document.getElementById('clock').textContent =
+    wib.toUTCString().slice(17, 25);
+}
+updateClock();
+setInterval(updateClock, 1000);
+</script>
 </body>
 </html>

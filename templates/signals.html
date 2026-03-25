@@ -1,68 +1,89 @@
 {% extends "base.html" %}
-{% block title %}Signals - Weather Trading Bot{% endblock %}
+{% block title %}Signals — WeatherBot{% endblock %}
+{% block page_title %}Trading Signals{% endblock %}
 {% block content %}
-<div class="signals-page">
-    <h2>🔔 Trading Signals</h2>
 
-    <div class="filters">
-        <form method="get" class="filter-form">
-            <select name="status" onchange="this.form.submit()">
-                <option value="all"      {% if status_filter == 'all'      %}selected{% endif %}>All Status</option>
-                <option value="pending"  {% if status_filter == 'pending'  %}selected{% endif %}>Pending</option>
-                <option value="executed" {% if status_filter == 'executed' %}selected{% endif %}>Executed</option>
-                <option value="skipped"  {% if status_filter == 'skipped'  %}selected{% endif %}>Skipped</option>
-            </select>
-            <select name="days" onchange="this.form.submit()">
-                <option value="1"  {% if days_filter == 1  %}selected{% endif %}>Last 24 hours</option>
-                <option value="7"  {% if days_filter == 7  %}selected{% endif %}>Last 7 days</option>
-                <option value="30" {% if days_filter == 30 %}selected{% endif %}>Last 30 days</option>
-            </select>
-        </form>
-    </div>
-
-    <div class="stats-row">
-        <div class="mini-stat">Total: {{ total_signals }}</div>
-        <div class="mini-stat pending">Pending: {{ pending_signals }}</div>
-        <div class="mini-stat executed">Executed: {{ executed_signals }}</div>
-        <div class="mini-stat skipped">Skipped: {{ skipped_signals }}</div>
-        <div class="mini-stat">Avg Edge: {{ "%.1f"|format(avg_edge) }}%</div>
-        <div class="mini-stat">Avg Conf: {{ "%.1f"|format(avg_confidence) }}%</div>
-    </div>
-
-    <div class="signals-table">
-        <table>
-            <thead>
-                <tr>
-                    <th>Date</th>
-                    <th>Location</th>
-                    <th>Market</th>
-                    <th>Direction</th>
-                    <th>Edge</th>
-                    <th>Confidence</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for signal in signals %}
-                <tr>
-                    <td>
-                        <!-- FIX: signal.created_at dari pymysql adalah datetime, handle None -->
-                        {% if signal.created_at %}{{ signal.created_at.strftime('%m/%d %H:%M') }}{% endif %}
-                    </td>
-                    <td>{{ signal.location or '-' }}</td>
-                    <!-- FIX: signal.market.question → signal.market_question -->
-                    <td class="market-cell">{{ (signal.market_question or '')[:60] }}...</td>
-                    <td><span class="badge {{ signal.direction.lower() }}">{{ signal.direction }}</span></td>
-                    <td><strong>+{{ "%.0f"|format(signal.edge or 0) }}%</strong></td>
-                    <td>{{ "%.0f"|format(signal.confidence or 0) }}%</td>
-                    <td><span class="badge status-{{ signal.status }}">{{ signal.status }}</span></td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% if not signals %}
-        <p class="empty-state">No signals found for the selected filter.</p>
-        {% endif %}
-    </div>
+<div class="kpi-grid" style="grid-template-columns:repeat(6,1fr);margin-bottom:20px;">
+  <div class="kpi-card">
+    <div class="kpi-label">Total</div>
+    <div class="kpi-value">{{ total_signals }}</div>
+  </div>
+  <div class="kpi-card yellow">
+    <div class="kpi-label">Pending</div>
+    <div class="kpi-value" style="color:var(--yellow)">{{ pending_signals }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Executed</div>
+    <div class="kpi-value" style="color:var(--blue)">{{ executed_signals }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Skipped</div>
+    <div class="kpi-value" style="color:var(--text-muted)">{{ skipped_signals }}</div>
+  </div>
+  <div class="kpi-card green">
+    <div class="kpi-label">Avg Edge</div>
+    <div class="kpi-value green">{{ "%.1f"|format(avg_edge) }}%</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Avg Conf</div>
+    <div class="kpi-value">{{ "%.1f"|format(avg_confidence) }}%</div>
+  </div>
 </div>
+
+<div class="filter-bar">
+  <form method="get" style="display:contents;">
+    <select name="status" onchange="this.form.submit()">
+      <option value="all"      {% if status_filter=='all'      %}selected{% endif %}>All Status</option>
+      <option value="pending"  {% if status_filter=='pending'  %}selected{% endif %}>Pending</option>
+      <option value="executed" {% if status_filter=='executed' %}selected{% endif %}>Executed</option>
+      <option value="skipped"  {% if status_filter=='skipped'  %}selected{% endif %}>Skipped</option>
+    </select>
+    <select name="days" onchange="this.form.submit()">
+      <option value="1"  {% if days_filter==1  %}selected{% endif %}>Last 24h</option>
+      <option value="7"  {% if days_filter==7  %}selected{% endif %}>Last 7 days</option>
+      <option value="30" {% if days_filter==30 %}selected{% endif %}>Last 30 days</option>
+    </select>
+  </form>
+</div>
+
+<div class="section">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Location</th>
+        <th>Market</th>
+        <th>Dir</th>
+        <th>Forecast</th>
+        <th>Market Odds</th>
+        <th>Edge</th>
+        <th>Confidence</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in signals %}
+      <tr>
+        <td class="td-mono" style="font-size:11px;color:var(--text-muted);white-space:nowrap">
+          {% if s.created_at %}{{ s.created_at.strftime('%m/%d %H:%M') }}{% endif %}
+        </td>
+        <td style="color:var(--cyan);font-size:12px;white-space:nowrap">{{ s.location or '—' }}</td>
+        <td class="td-market td-primary">{{ (s.market_question or '')[:55] }}...</td>
+        <td>
+          <span class="badge badge-{{ s.direction.lower() if s.direction else 'no' }}">{{ s.direction or '—' }}</span>
+        </td>
+        <td class="td-mono">{{ "%.0f"|format(s.noaa_probability or 0) }}%</td>
+        <td class="td-mono" style="color:var(--text-muted)">{{ "%.0f"|format(s.market_probability or 0) }}%</td>
+        <td class="td-mono positive"><strong>+{{ "%.0f"|format(s.edge or 0) }}%</strong></td>
+        <td class="td-mono">{{ "%.0f"|format(s.confidence or 0) }}%</td>
+        <td><span class="badge badge-{{ s.status or 'pending' }}">{{ s.status or 'pending' }}</span></td>
+      </tr>
+      {% endfor %}
+      {% if not signals %}
+      <tr><td colspan="9"><div class="empty-state"><div class="empty-icon">🔔</div>No signals found</div></td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
 {% endblock %}

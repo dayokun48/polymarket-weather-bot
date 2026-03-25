@@ -1,15 +1,15 @@
 """
 polymarket_trader.py
 =====================
-Places trades on Polymarket (simulation + real mode).
+Places trades on Polymarket via py-clob-client SDK.
 
-Fixes dari original:
-  - datetime.utcnow() deprecated → datetime.now(timezone.utc)
-  - gas_fee & total_cost tidak ada di tabel trades → dihapus dari trade_result
-  - signal['x'] tanpa .get() → crash jika field tidak ada
-  - trade_result sekarang include signal_id (dibutuhkan risk_manager.record_trade)
-  - Status 'SIMULATED' tidak valid untuk tabel trades → pakai 'open'
-  - Mode semi-auto: kirim alert dulu, eksekusi setelah konfirmasi
+Modes:
+  manual    → tidak eksekusi, hanya alert
+  semi-auto → alert + tunggu konfirmasi Telegram
+  full-auto → eksekusi langsung
+
+Real trading memerlukan CLOB credentials di .env:
+  PRIVATE_KEY, CLOB_API_KEY, CLOB_SECRET, CLOB_PASSPHRASE, WALLET_ADDRESS
 """
 
 import logging
@@ -20,48 +20,48 @@ import config
 
 logger = logging.getLogger(__name__)
 
+CLOB_HOST = "https://clob.polymarket.com"
+CHAIN_ID  = 137  # Polygon mainnet
+
 
 class PolymarketTrader:
-    """
-    Execute trades on Polymarket.
-
-    Mode:
-      manual    → tidak eksekusi, hanya alert
-      semi-auto → alert + tunggu konfirmasi Telegram sebelum eksekusi
-      full-auto → eksekusi langsung tanpa konfirmasi
-
-    Saat ini: simulation mode.
-    Real trading butuh Polymarket CLOB API key dan USDC di wallet Polygon.
-    """
 
     def __init__(self):
-        self.clob_api   = config.CLOB_API
-        self.account    = None
-        self.address    = None
-        self.w3         = None
-        self._init_wallet()
+        self._client = None
+        self._init_client()
 
-    def _init_wallet(self):
-        """Inisialisasi wallet dari private key di .env."""
-        private_key = config.PRIVATE_KEY
-        if not private_key or private_key == "-":
-            logger.warning("⚠️  Private key tidak dikonfigurasi — trading disabled")
+    def _init_client(self):
+        """Inisialisasi CLOB client dari credentials di .env."""
+        if not config.PRIVATE_KEY or config.PRIVATE_KEY == "-":
+            logger.warning("⚠️  PRIVATE_KEY tidak diset — simulation mode")
             return
-
+        if not config.CLOB_IS_READY():
+            logger.warning("⚠️  CLOB credentials belum lengkap — simulation mode")
+            return
         try:
-            from web3 import Web3
-            from eth_account import Account
+            from py_clob_client.client import ClobClient
+            from py_clob_client.clob_types import ApiCreds
 
-            self.w3      = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
-            self.account = Account.from_key(private_key)
-            self.address = self.account.address
-            logger.info(f"✅ Wallet loaded: {self.address[:10]}...")
+            creds = ApiCreds(
+                api_key        = config.CLOB_API_KEY,
+                api_secret     = config.CLOB_SECRET,
+                api_passphrase = config.CLOB_PASSPHRASE,
+            )
+            self._client = ClobClient(
+                CLOB_HOST,
+                key            = config.PRIVATE_KEY,
+                chain_id       = CHAIN_ID,
+                creds          = creds,
+                signature_type = 2,   # Gnosis Safe (proxy wallet)
+                funder         = config.WALLET_ADDRESS,
+            )
+            logger.info(f"✅ CLOB client ready — funder: {config.WALLET_ADDRESS[:10]}...")
         except ImportError:
-            logger.error("❌ web3 tidak terinstall — jalankan: pip install web3")
+            logger.error("❌ py-clob-client tidak terinstall")
         except Exception as e:
-            logger.error(f"❌ Gagal load wallet: {e}")
+            logger.error(f"❌ Gagal init CLOB client: {e}")
 
-    # ── Main execute ───────────────────────────────────────────────────────────
+    # ── Main execute ──────────────────────────────────────────────────────────
 
     def execute_trade(
         self,
@@ -70,29 +70,16 @@ class PolymarketTrader:
         bet_size:  float,
     ) -> Optional[Dict]:
         """
-        Eksekusi trade berdasarkan signal.
-
-        Args:
-            signal    : signal dict dari WeatherAnalyzer
-            signal_id : ID dari tabel signals (FK untuk tabel trades)
-            bet_size  : jumlah bet dalam USD
-
-        Returns dict trade_result yang siap dipakai risk_manager.record_trade(),
-        atau None jika gagal.
+        Eksekusi trade. Returns trade_result dict atau None jika gagal.
         """
         mode = config.AUTOMATION_MODE()
-
         if mode == "manual":
-            logger.info("ℹ️  Mode manual — tidak ada eksekusi otomatis")
-            return None
-
-        if not self.account and mode == "full-auto":
-            logger.error("❌ Wallet tidak dikonfigurasi — tidak bisa full-auto")
+            logger.info("ℹ️  Mode manual — tidak ada eksekusi")
             return None
 
         market_id       = signal.get("market_id", "")
         market_question = signal.get("market_question", "")
-        direction       = signal.get("direction", "")
+        direction       = signal.get("direction", "YES")
         current_price   = signal.get("current_price", 0.5)
 
         logger.info("=" * 55)
@@ -106,114 +93,129 @@ class PolymarketTrader:
         # Cek balance
         balance = self.get_balance()
         logger.info(f"💰 Balance: ${balance:.2f} USDC")
-
-        if balance < bet_size and self.account:
+        if balance < bet_size and self._client:
             logger.error(f"❌ Balance tidak cukup: ${balance:.2f} < ${bet_size:.2f}")
             return None
 
-        # Hitung shares
-        shares = bet_size / current_price if current_price > 0 else 0
+        # Real trading jika client ready
+        if self._client:
+            return self._execute_real(signal, signal_id, bet_size, direction, current_price, market_id, market_question)
+        else:
+            return self._execute_simulation(signal, signal_id, bet_size, direction, current_price, market_id, market_question)
 
-        # ── Simulation mode ────────────────────────────────────────────────────
-        # Real implementation perlu:
-        # 1. Approve USDC spending ke Polymarket CTF contract
-        # 2. POST ke /order di CLOB API dengan signed order
-        # 3. Poll order status sampai filled
-        # 4. Return tx_hash dari on-chain confirmation
+    def _execute_real(self, signal, signal_id, bet_size, direction, price, market_id, market_question):
+        """Eksekusi real via CLOB API."""
+        try:
+            from py_clob_client.clob_types import OrderArgs, OrderType
+            from py_clob_client.order_builder.constants import BUY, SELL
 
+            # Ambil token_id YES atau NO dari signal
+            token_id  = signal.get("asset_id") or signal.get("token_id", "")
+            if not token_id:
+                logger.error("❌ token_id tidak ada di signal")
+                return None
+
+            # YES → BUY YES token, NO → BUY NO token
+            side       = BUY
+            tick_size  = self._client.get_tick_size(token_id) or "0.01"
+            neg_risk   = self._client.get_neg_risk(token_id) or False
+
+            # Harga: pakai market price dengan sedikit slippage
+            order_price = round(min(price + 0.01, 0.99), 4)
+            shares      = round(bet_size / order_price, 4)
+
+            logger.info(f"📤 Placing order: {shares:.2f} shares @ {order_price:.4f}")
+
+            response = self._client.create_and_post_order(
+                OrderArgs(
+                    token_id = token_id,
+                    price    = order_price,
+                    size     = shares,
+                    side     = side,
+                ),
+                options    = {"tick_size": str(tick_size), "neg_risk": neg_risk},
+                order_type = OrderType.GTC,
+            )
+
+            order_id = response.get("orderID", "")
+            status   = response.get("status", "unknown")
+            logger.info(f"✅ Order placed: {order_id} | status: {status}")
+
+            return {
+                "trade_id":       order_id,
+                "signal_id":      signal_id,
+                "market_id":      market_id,
+                "direction":      direction,
+                "bet_size":       round(bet_size, 2),
+                "entry_price":    order_price,
+                "shares":         shares,
+                "executed_at":    datetime.now(timezone.utc),
+                "status":         "open",
+                "tx_hash":        order_id,
+                "market_question": market_question,
+                "simulation":     False,
+                "order_status":   status,
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Execute real error: {e}")
+            return None
+
+    def _execute_simulation(self, signal, signal_id, bet_size, direction, price, market_id, market_question):
+        """Simulation mode — tidak ada trade sungguhan."""
         logger.warning("⚠️  SIMULATION MODE — tidak ada trade sungguhan")
-
-        trade_result = {
-            # ── Field yang masuk ke tabel trades ────────────────────────────
+        shares = round(bet_size / price, 4) if price > 0 else 0
+        return {
             "trade_id":       f"SIM_{datetime.now(timezone.utc).timestamp():.0f}",
-            "signal_id":      signal_id,        # FK ke tabel signals
+            "signal_id":      signal_id,
             "market_id":      market_id,
             "direction":      direction,
             "bet_size":       round(bet_size, 2),
-            "entry_price":    current_price,
-            "shares":         round(shares, 4),
+            "entry_price":    price,
+            "shares":         shares,
             "executed_at":    datetime.now(timezone.utc),
-            "status":         "open",           # 'open' sesuai schema trades
+            "status":         "open",
             "tx_hash":        None,
-            # ── Extra untuk Telegram confirmation ────────────────────────────
             "market_question": market_question,
-            "simulation":      True,
+            "simulation":     True,
         }
 
-        logger.info("=" * 55)
-        logger.info("✅ TRADE SIMULATED")
-        logger.info(f"   Trade ID: {trade_result['trade_id']}")
-        logger.info(f"   Shares  : {trade_result['shares']:.4f}")
-        logger.info("=" * 55)
-
-        return trade_result
-
-    # ── Balance ────────────────────────────────────────────────────────────────
+    # ── Balance ───────────────────────────────────────────────────────────────
 
     def get_balance(self) -> float:
-        """
-        Ambil saldo USDC di wallet Polygon.
-        Returns 0.0 jika wallet tidak dikonfigurasi atau error.
-        """
-        if not self.address or not self.w3:
-            return 0.0
+        """Ambil saldo USDC via CLOB API atau on-chain."""
+        if self._client:
+            try:
+                resp = self._client.get_balance_allowance()
+                return float(resp.get("balance", 0)) / 1e6
+            except Exception:
+                pass
 
+        # Fallback: on-chain via web3
         try:
             from web3 import Web3
+            from eth_account import Account
 
-            # USDC contract di Polygon (6 decimals)
-            usdc_address = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
-            usdc_abi = [{
-                "constant": True,
-                "inputs": [{"name": "_owner", "type": "address"}],
-                "name": "balanceOf",
-                "outputs": [{"name": "balance", "type": "uint256"}],
-                "type": "function",
-            }]
-
-            contract    = self.w3.eth.contract(
-                address=Web3.to_checksum_address(usdc_address),
-                abi=usdc_abi,
+            w3      = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
+            account = Account.from_key(config.PRIVATE_KEY)
+            usdc    = w3.eth.contract(
+                address=Web3.to_checksum_address("0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"),
+                abi=[{"constant":True,"inputs":[{"name":"_owner","type":"address"}],
+                      "name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]
             )
-            balance_raw = contract.functions.balanceOf(
-                Web3.to_checksum_address(self.address)
-            ).call()
-
-            return balance_raw / 1e6  # USDC punya 6 decimals
-
-        except Exception as e:
-            logger.error(f"Error get_balance: {e}")
+            return usdc.functions.balanceOf(account.address).call() / 1e6
+        except Exception:
             return 0.0
 
-    # ── Position management ────────────────────────────────────────────────────
-
-    def get_open_positions(self) -> list:
-        """
-        Ambil posisi yang masih open.
-        Untuk sekarang baca dari database via position_tracker.
-        """
-        return []
-
-    def close_position(self, position_id: str) -> bool:
-        """
-        Tutup posisi (jual shares).
-        Belum diimplementasi — butuh CLOB API integration.
-        """
-        logger.warning("⚠️  close_position belum diimplementasi")
-        return False
-
-    # ── Utility ───────────────────────────────────────────────────────────────
-
     def is_ready(self) -> bool:
-        """Cek apakah trader siap untuk eksekusi real."""
-        return self.account is not None and self.w3 is not None
+        return self._client is not None
 
     def get_status(self) -> Dict:
-        """Status trader untuk dashboard."""
+        balance = self.get_balance() if self.is_ready() else 0.0
         return {
-            "wallet_configured": self.account is not None,
-            "wallet_address":    self.address[:10] + "..." if self.address else None,
-            "balance_usdc":      self.get_balance() if self.account else 0.0,
+            "wallet_configured": self.is_ready(),
+            "wallet_address":    (config.WALLET_ADDRESS[:10] + "...") if config.WALLET_ADDRESS else None,
+            "balance_usdc":      balance,
             "mode":              config.AUTOMATION_MODE(),
             "simulation":        not self.is_ready(),
         }

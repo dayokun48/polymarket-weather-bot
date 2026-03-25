@@ -37,6 +37,11 @@ TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
 PRIVATE_KEY    = os.getenv("PRIVATE_KEY")
 
+# CLOB API credentials (generate via generate_clob_creds.py)
+CLOB_API_KEY    = os.getenv("CLOB_API_KEY",    "")
+CLOB_SECRET     = os.getenv("CLOB_SECRET",     "")
+CLOB_PASSPHRASE = os.getenv("CLOB_PASSPHRASE", "")
+
 # Weather API keys
 TOMORROW_IO_API_KEY = os.getenv("TOMORROW_IO_API_KEY", "-")
 
@@ -142,6 +147,9 @@ def MIN_MARKET_VOLUME():        return get("min_market_volume",      float)
 def MIN_MARKET_LIQUIDITY():     return get("min_market_liquidity",   float)
 def MIN_TIME_LEFT_HOURS():      return get("min_time_left_hours",    float)
 def MAX_TIME_LEFT_HOURS():      return get("max_time_left_hours",    float)
+def AUTO_TRADE_THRESHOLD():     return get("auto_trade_threshold",  float)
+def AUTO_TRADE_AMOUNT():        return get("auto_trade_amount",     float)
+def CLOB_IS_READY():            return bool(CLOB_API_KEY and CLOB_SECRET and CLOB_PASSPHRASE)
 
 
 # ── Validasi ───────────────────────────────────────────────────────────────────

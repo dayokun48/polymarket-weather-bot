@@ -1,122 +1,119 @@
 {% extends "base.html" %}
-{% block title %}Settings - Weather Trading Bot{% endblock %}
+{% block title %}Settings — WeatherBot{% endblock %}
+{% block page_title %}Bot Settings{% endblock %}
 {% block content %}
-<div class="settings-page">
-    <h2>⚙️ Bot Settings</h2>
-    <p class="settings-note">Settings disimpan di database dan aktif langsung tanpa restart bot.</p>
 
-    <form method="post" class="settings-form">
+<form method="post" action="{{ url_for('settings.manage_settings') }}">
+  <div class="settings-grid">
 
-        <div class="settings-section">
-            <h3>🤖 Automation</h3>
-            <div class="form-group">
-                <label for="automation_mode">Automation Mode</label>
-                <select id="automation_mode" name="automation_mode">
-                    <option value="manual"    {% if settings.get('automation_mode') == 'manual'    %}selected{% endif %}>Manual (alert only)</option>
-                    <option value="semi-auto" {% if settings.get('automation_mode','semi-auto') == 'semi-auto' %}selected{% endif %}>Semi-Auto (Telegram approval)</option>
-                    <option value="full-auto" {% if settings.get('automation_mode') == 'full-auto' %}selected{% endif %}>Full-Auto (execute all signals)</option>
-                </select>
-            </div>
+    <!-- Trading Mode -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">⚙️ Trading Mode</span>
+      </div>
+      <div class="section-body">
+        <div class="form-group">
+          <label>Automation Mode</label>
+          <select name="automation_mode">
+            <option value="manual"    {% if settings.automation_mode=='manual'    %}selected{% endif %}>Manual</option>
+            <option value="semi-auto" {% if settings.automation_mode=='semi-auto' %}selected{% endif %}>Semi-Auto</option>
+            <option value="full-auto" {% if settings.automation_mode=='full-auto' %}selected{% endif %}>Full-Auto</option>
+          </select>
+          <small>semi-auto: approve each trade via Telegram</small>
         </div>
-
-        <div class="settings-section">
-            <h3>🎯 Signal Filters</h3>
-            <div class="form-group">
-                <label for="min_edge_pct">Minimum Edge (%)</label>
-                <input type="number" id="min_edge_pct" name="min_edge_pct"
-                       value="{{ settings.get('min_edge_pct', '15') }}"
-                       min="5" max="50" step="1">
-                <small>Hanya kirim signal dengan edge di atas nilai ini</small>
-            </div>
-            <div class="form-group">
-                <label for="min_confidence_pct">Minimum Confidence (%)</label>
-                <input type="number" id="min_confidence_pct" name="min_confidence_pct"
-                       value="{{ settings.get('min_confidence_pct', '80') }}"
-                       min="50" max="100" step="1">
-                <small>Hanya kirim signal dengan confidence di atas nilai ini</small>
-            </div>
+        <div class="form-group">
+          <label>Check Interval (minutes)</label>
+          <input type="number" name="check_interval_minutes" value="{{ settings.check_interval_minutes }}" min="30" max="480">
+          <small>how often to scan for opportunities</small>
         </div>
-
-        <div class="settings-section">
-            <h3>💰 Risk Management</h3>
-            <div class="form-group">
-                <label for="max_bet_pct">Maximum Bet Size (% of bankroll)</label>
-                <!-- FIX: default '5' bukan '0.05' -->
-                <input type="number" id="max_bet_pct" name="max_bet_pct"
-                       value="{{ settings.get('max_bet_pct', '5') }}"
-                       min="1" max="25" step="1">
-                <small>Contoh: 5 = maksimal 5% bankroll per trade</small>
-            </div>
-            <div class="form-group">
-                <label for="max_daily_trades">Maximum Daily Trades</label>
-                <input type="number" id="max_daily_trades" name="max_daily_trades"
-                       value="{{ settings.get('max_daily_trades', '10') }}"
-                       min="1" max="50" step="1">
-                <small>Circuit breaker: batas trade per hari</small>
-            </div>
-            <div class="form-group">
-                <label for="max_daily_loss_pct">Maximum Daily Loss (%)</label>
-                <input type="number" id="max_daily_loss_pct" name="max_daily_loss_pct"
-                       value="{{ settings.get('max_daily_loss_pct', '10') }}"
-                       min="1" max="50" step="1">
-                <small>Stop trading jika loss harian melebihi % ini dari bankroll</small>
-            </div>
+        <div class="form-group">
+          <label>Alert Cooldown (seconds)</label>
+          <input type="number" name="alert_cooldown_seconds" value="{{ settings.alert_cooldown_seconds }}" min="60">
+          <small>minimum time between duplicate alerts</small>
         </div>
+      </div>
+    </div>
 
-        <div class="settings-section">
-            <h3>🌤️ Market Filters</h3>
-            <div class="form-group">
-                <label for="min_market_volume">Minimum Market Volume ($)</label>
-                <input type="number" id="min_market_volume" name="min_market_volume"
-                       value="{{ settings.get('min_market_volume', '1000') }}"
-                       min="0" step="100">
-                <small>Abaikan market dengan volume di bawah ini</small>
-            </div>
-            <div class="form-group">
-                <label for="min_market_liquidity">Minimum Liquidity ($)</label>
-                <input type="number" id="min_market_liquidity" name="min_market_liquidity"
-                       value="{{ settings.get('min_market_liquidity', '500') }}"
-                       min="0" step="100">
-            </div>
-            <div class="form-group">
-                <label for="min_time_left_hours">Min Time Left (hours)</label>
-                <input type="number" id="min_time_left_hours" name="min_time_left_hours"
-                       value="{{ settings.get('min_time_left_hours', '1') }}"
-                       min="0" step="1">
-                <small>Abaikan market yang tutup dalam waktu kurang dari ini</small>
-            </div>
-            <div class="form-group">
-                <label for="max_time_left_hours">Max Time Left (hours)</label>
-                <input type="number" id="max_time_left_hours" name="max_time_left_hours"
-                       value="{{ settings.get('max_time_left_hours', '72') }}"
-                       min="1" step="1">
-                <small>Abaikan market yang masih lebih dari ini jam lagi</small>
-            </div>
+    <!-- Signal Filters -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">🔔 Signal Filters</span>
+      </div>
+      <div class="section-body">
+        <div class="form-group">
+          <label>Min Edge (%)</label>
+          <input type="number" name="min_edge_pct" value="{{ settings.min_edge_pct }}" min="5" max="50" step="0.5">
+          <small>minimum edge to generate a signal</small>
         </div>
+        <div class="form-group">
+          <label>Min Confidence (%)</label>
+          <input type="number" name="min_confidence_pct" value="{{ settings.min_confidence_pct }}" min="30" max="95" step="5">
+          <small>minimum forecast confidence</small>
+        </div>
+        <div class="form-group">
+          <label>Min Market Volume ($)</label>
+          <input type="number" name="min_market_volume" value="{{ settings.min_market_volume }}" min="0">
+        </div>
+        <div class="form-group">
+          <label>Min Market Liquidity ($)</label>
+          <input type="number" name="min_market_liquidity" value="{{ settings.min_market_liquidity }}" min="0">
+        </div>
+      </div>
+    </div>
 
-        <div class="settings-section">
-            <h3>⏰ Scheduling</h3>
-            <!-- FIX: check_interval_hours → check_interval_minutes sesuai DB -->
-            <div class="form-group">
-                <label for="check_interval_minutes">Scan Interval (minutes)</label>
-                <input type="number" id="check_interval_minutes" name="check_interval_minutes"
-                       value="{{ settings.get('check_interval_minutes', '120') }}"
-                       min="5" max="1440" step="5">
-                <small>Seberapa sering bot scan peluang (default: 120 menit)</small>
-            </div>
-            <div class="form-group">
-                <label for="alert_cooldown_seconds">Alert Cooldown (seconds)</label>
-                <input type="number" id="alert_cooldown_seconds" name="alert_cooldown_seconds"
-                       value="{{ settings.get('alert_cooldown_seconds', '300') }}"
-                       min="60" max="3600" step="60">
-                <small>Jeda minimum antara alert untuk market yang sama</small>
-            </div>
+    <!-- Risk Management -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">🛡️ Risk Management</span>
+      </div>
+      <div class="section-body">
+        <div class="form-group">
+          <label>Bankroll ($)</label>
+          <input type="number" name="bankroll" value="{{ settings.bankroll }}" min="10" step="10">
+          <small>total capital for position sizing</small>
         </div>
+        <div class="form-group">
+          <label>Max Bet per Trade (%)</label>
+          <input type="number" name="max_bet_pct" value="{{ settings.max_bet_pct }}" min="1" max="25" step="0.5">
+          <small>% of bankroll per trade (Kelly criterion)</small>
+        </div>
+        <div class="form-group">
+          <label>Max Daily Trades</label>
+          <input type="number" name="max_daily_trades" value="{{ settings.max_daily_trades }}" min="1" max="50">
+        </div>
+        <div class="form-group">
+          <label>Max Daily Loss (%)</label>
+          <input type="number" name="max_daily_loss_pct" value="{{ settings.max_daily_loss_pct }}" min="1" max="50" step="0.5">
+          <small>stop trading if daily loss exceeds this</small>
+        </div>
+      </div>
+    </div>
 
-        <div class="form-actions">
-            <button type="submit" class="btn-primary">💾 Save Settings</button>
-            <button type="reset"  class="btn-secondary">Reset</button>
+    <!-- Market Timing -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">⏰ Market Timing</span>
+      </div>
+      <div class="section-body">
+        <div class="form-group">
+          <label>Min Time Left (hours)</label>
+          <input type="number" name="min_time_left_hours" value="{{ settings.min_time_left_hours }}" min="0.5" step="0.5">
+          <small>ignore markets closing too soon</small>
         </div>
-    </form>
-</div>
+        <div class="form-group">
+          <label>Max Time Left (hours)</label>
+          <input type="number" name="max_time_left_hours" value="{{ settings.max_time_left_hours }}" min="1" step="1">
+          <small>ignore markets too far in the future</small>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">💾  Save Settings</button>
+    <a href="{{ url_for('overview.index') }}" class="btn btn-secondary">Cancel</a>
+  </div>
+</form>
+
 {% endblock %}
