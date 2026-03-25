@@ -37,6 +37,9 @@ TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
 PRIVATE_KEY    = os.getenv("PRIVATE_KEY")
 
+# Weather API keys
+TOMORROW_IO_API_KEY = os.getenv("TOMORROW_IO_API_KEY", "-")
+
 DB_HOST     = os.getenv("DB_HOST",  "127.0.0.1")
 DB_PORT     = int(os.getenv("DB_PORT", 3306))
 DB_USER     = os.getenv("DB_USER",  "root")
@@ -220,7 +223,8 @@ Market filters (dari DB)
 
 Weather sources
   US cities       : NOAA (free, no key)
-  Global cities   : Open-Meteo (free, no key)
+  Global cities   : Open-Meteo ECMWF (free, no key)
+  Tomorrow.io     : {"✅ aktif" if TOMORROW_IO_API_KEY and TOMORROW_IO_API_KEY != "-" else "❌ tidak dikonfigurasi"}
   Resolusi check  : Wunderground scraping (no key)
 
 Credentials (dari .env)
