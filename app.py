@@ -120,6 +120,7 @@ def scan_for_opportunities():
 
     try:
         bankroll          = get_bankroll()
+        real_balance      = trader.get_balance()  # saldo USDC real dari wallet
         auto_threshold    = config.AUTO_TRADE_THRESHOLD()
         total_signals     = 0
         total_auto_trades = 0
@@ -163,7 +164,7 @@ def scan_for_opportunities():
         for signal in signals:
             try:
                 # Step 4: Validasi
-                is_valid, reason = risk_mgr.validate_signal(signal, bankroll)
+                is_valid, reason = risk_mgr.validate_signal(signal, bankroll, real_balance)
                 if not is_valid:
                     logger.info(f"⏭️  Skip: {reason}")
                     continue

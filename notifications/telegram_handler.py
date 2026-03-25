@@ -47,21 +47,47 @@ class TelegramHandler:
     Thread-safe — akses DB dengan connection baru tiap request.
     """
 
-    POLL_TIMEOUT = 30    # long-polling timeout (detik)
-    RETRY_SLEEP  = 10    # sleep saat error sebelum retry
+    POLL_TIMEOUT   = 30    # long-polling timeout (detik)
+    RETRY_SLEEP    = 10    # sleep saat error
+    CONV_EXPIRE_S  = 300   # conversation state expire setelah 5 menit
 
     def __init__(self, risk_manager, trader, scanner_func: Callable = None):
         self.risk_manager  = risk_manager
         self.trader        = trader
-        self.scanner_func  = scanner_func   # fungsi scan_for_opportunities dari app.py
+        self.scanner_func  = scanner_func
         self.token         = config.TELEGRAM_BOT_TOKEN
         self.chat_id       = config.TELEGRAM_CHAT_ID
         self.base_url      = f"https://api.telegram.org/bot{self.token}"
         self._offset       = 0
         self._running      = False
         self._thread       = None
-        # Conversation state: {chat_id: {"action": "awaiting_bet", "signal_id": X}}
+        # Conversation state: {chat_id: {"action": "awaiting_bet", "signal_id": X, "ts": timestamp}}
+        # FIX 3: tambah timestamp untuk expiry, load dari DB saat init
         self._conv_state: Dict[str, Dict] = {}
+        self._load_pending_signals()
+
+    def _load_pending_signals(self):
+        """
+        FIX 3: Load signal pending dari DB saat bot restart.
+        Kalau ada signal pending yang belum di-execute/skip, bot masih bisa handle.
+        """
+        try:
+            conn = self._get_conn()
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id, market_id, direction, edge, confidence
+                        FROM signals
+                        WHERE status = 'pending'
+                          AND DATE(created_at) = CURDATE()
+                        ORDER BY created_at DESC
+                        LIMIT 10
+                    """)
+                    pending = cur.fetchall()
+            if pending:
+                logger.info(f"📋 {len(pending)} signal pending ditemukan dari restart")
+        except Exception:
+            pass
 
     # ── Public ────────────────────────────────────────────────────────────────
 
@@ -144,11 +170,12 @@ class TelegramHandler:
 
         if action == "execute":
             self._answer_callback(cb_id, "💰 Berapa yang mau di-bet?")
-            # Set conversation state — tunggu input jumlah
+            # FIX 3: simpan timestamp untuk expiry check
             self._conv_state[chat_id] = {
                 "action":    "awaiting_bet",
                 "signal_id": signal_id,
                 "msg_id":    msg_id,
+                "ts":        time.time(),
             }
             self._send(chat_id,
                 f"💰 <b>Berapa yang mau di-bet?</b>\n\n"
@@ -168,6 +195,12 @@ class TelegramHandler:
 
     def _handle_conversation(self, chat_id: str, text: str, msg: dict):
         state = self._conv_state.get(chat_id, {})
+
+        # FIX 3: Cek apakah conversation state sudah expired
+        if time.time() - state.get("ts", 0) > self.CONV_EXPIRE_S:
+            del self._conv_state[chat_id]
+            self._send(chat_id, "⏱️ Session expired. Klik tombol EXECUTE lagi.")
+            return
 
         if state.get("action") == "awaiting_bet":
             if text.lower() == "cancel":
@@ -353,8 +386,9 @@ Open pos   : {open_positions}
                 self._send(chat_id, f"❌ Signal #{signal_id} tidak ditemukan.")
                 return
 
-            # Validasi via risk manager
-            ok, reason = self.risk_manager.validate_signal(signal, self.trader.get_balance())
+            # Validasi via risk manager dengan saldo real
+            real_balance = self.trader.get_balance()
+            ok, reason = self.risk_manager.validate_signal(signal, self.trader.get_balance(), real_balance)
             if not ok:
                 self._send(chat_id, f"❌ Validasi gagal: {reason}")
                 return

@@ -42,9 +42,17 @@ class RiskManager:
 
     # ── Validation ─────────────────────────────────────────────────────────────
 
-    def validate_signal(self, signal: Dict, bankroll: float) -> Tuple[bool, str]:
+    def validate_signal(self, signal: Dict, bankroll: float,
+                        real_balance: float = None) -> Tuple[bool, str]:
         """
         Validasi apakah signal layak untuk ditrading.
+
+        Args:
+            signal       : signal dict dari WeatherAnalyzer
+            bankroll     : bankroll dari DB (untuk % calculation)
+            real_balance : saldo USDC real dari wallet (opsional)
+                           jika diisi, cek apakah cukup untuk bet
+
         Returns (is_valid, reason).
         """
         if self.paused:
@@ -63,7 +71,7 @@ class RiskManager:
             return False, f"Confidence {signal.get('confidence', 0):.1f}% di bawah minimum {min_confidence}%"
 
         if signal.get("market_liquidity", 0) < min_liquidity:
-            return False, f"Likuiditas ${signal.get('market_liquidity', 0):,.0f} terlalu rendah (min ${min_liquidity:,.0f})"
+            return False, f"Likuiditas ${signal.get('market_liquidity', 0):,.0f} terlalu rendah"
 
         today_trades = self._get_today_trades()
         if len(today_trades) >= max_trades:
@@ -77,7 +85,35 @@ class RiskManager:
         if self.consecutive_losses >= 3:
             return False, "3 loss berturut-turut — auto-pause aktif"
 
+        # FIX 1: Cek saldo real jika tersedia
+        if real_balance is not None:
+            min_bet = max(config.AUTO_TRADE_AMOUNT() if hasattr(config, 'AUTO_TRADE_AMOUNT') else 5.0, 1.0)
+            if real_balance < min_bet:
+                return False, f"Saldo real tidak cukup: ${real_balance:.2f} < ${min_bet:.2f}"
+
+        # FIX 2: Cek duplicate — market_id yang sama sudah ada signal pending hari ini
+        if self._is_duplicate_signal(signal.get("market_id", "")):
+            return False, f"Duplicate signal — market ini sudah ada signal pending hari ini"
+
         return True, "OK"
+
+    def _is_duplicate_signal(self, market_id: str) -> bool:
+        """Cek apakah sudah ada signal pending untuk market_id yang sama hari ini."""
+        if not market_id:
+            return False
+        try:
+            conn = self._get_conn()
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT COUNT(*) as cnt FROM signals
+                        WHERE market_id = %s
+                          AND status = 'pending'
+                          AND DATE(created_at) = CURDATE()
+                    """, (market_id,))
+                    return cur.fetchone()["cnt"] > 0
+        except Exception:
+            return False
 
     # ── Position sizing ────────────────────────────────────────────────────────
 
