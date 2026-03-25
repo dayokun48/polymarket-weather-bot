@@ -1,8 +1,8 @@
 """
-Markets Route
+Markets Route - filter past markets, pass now to template
 """
 from flask import Blueprint, render_template, request
-from datetime import datetime
+from datetime import datetime, timezone
 import pymysql
 import config
 
@@ -22,11 +22,12 @@ def _get_conn():
 
 @markets_bp.route('/markets')
 def list_markets():
-    search    = request.args.get('search', '')
-    sort      = request.args.get('sort', 'volume')
-    page      = int(request.args.get('page', 1))
-    per_page  = 50
-    offset    = (page - 1) * per_page
+    search   = request.args.get('search', '')
+    sort     = request.args.get('sort', 'volume')
+    page     = int(request.args.get('page', 1))
+    per_page = 50
+    offset   = (page - 1) * per_page
+    now      = datetime.now(timezone.utc)
 
     markets   = []
     total     = 0
@@ -38,14 +39,14 @@ def list_markets():
         with conn:
             with conn.cursor() as cur:
 
-                # Build WHERE clause
-                where = "WHERE 1=1"
-                args  = []
+                # Base WHERE — hanya tampilkan market yang belum expired
+                where = "WHERE (end_date IS NULL OR end_date > %s)"
+                args  = [now]
+
                 if search:
                     where += " AND question LIKE %s"
                     args.append(f"%{search}%")
 
-                # Sort options
                 order = {
                     "volume":    "volume DESC",
                     "liquidity": "liquidity DESC",
@@ -53,11 +54,9 @@ def list_markets():
                     "newest":    "first_seen DESC",
                 }.get(sort, "volume DESC")
 
-                # Total count
                 cur.execute(f"SELECT COUNT(*) as cnt FROM markets {where}", args)
                 total = cur.fetchone()["cnt"]
 
-                # Summary stats
                 cur.execute(f"""
                     SELECT SUM(volume) as tv, SUM(liquidity) as tl
                     FROM markets {where}
@@ -66,10 +65,8 @@ def list_markets():
                 total_vol = float(row["tv"] or 0)
                 total_liq = float(row["tl"] or 0)
 
-                # Paginated results
                 cur.execute(f"""
-                    SELECT id, question, category, end_date,
-                           volume, liquidity, url, last_checked
+                    SELECT id, question, end_date, volume, liquidity, url
                     FROM markets
                     {where}
                     ORDER BY {order}
@@ -93,4 +90,5 @@ def list_markets():
         total_vol   = total_vol,
         total_liq   = total_liq,
         per_page    = per_page,
+        now         = now,
     )
