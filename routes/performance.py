@@ -1,8 +1,8 @@
 """
-Performance Route
+Performance Route — updated to match performance.html template variables
 """
 from flask import Blueprint, render_template
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta, timezone
 import pymysql
 import config
 
@@ -22,31 +22,30 @@ def _get_conn():
 
 @performance_bp.route('/performance')
 def show_performance():
-    thirty_days_ago = datetime.now().date() - timedelta(days=30)
+    today           = date.today()
+    thirty_days_ago = today - timedelta(days=30)
 
-    daily_stats    = []
-    all_trades     = []
-    total_trades   = 0
-    wins = losses  = 0
-    win_rate       = 0.0
-    total_invested = total_returned = total_pnl = roi = 0.0
-    best_trade = worst_trade = None
-    avg_trade_size = 0.0
-    chart_dates = chart_pnl = chart_winrate = []
+    # Defaults
+    daily_performance = []
+    best_trades       = []
+    worst_trades      = []
+    total_trades      = wins = losses = 0
+    win_rate          = total_pnl = today_pnl = avg_bet_size = max_drawdown = 0.0
+    today_trades      = 0
 
     try:
         conn = _get_conn()
         with conn:
             with conn.cursor() as cur:
-                # Last 30 days daily performance
+
+                # Daily performance (last 30 days)
                 cur.execute("""
                     SELECT * FROM daily_performance
-                    WHERE date >= %s
-                    ORDER BY date DESC
+                    WHERE date >= %s ORDER BY date DESC
                 """, (thirty_days_ago,))
-                daily_stats = cur.fetchall()
+                daily_performance = cur.fetchall()
 
-                # All closed trades — FIX: outcome 'win'/'loss' lowercase
+                # All closed trades
                 cur.execute("""
                     SELECT t.*, m.question as market_question
                     FROM trades t
@@ -56,42 +55,50 @@ def show_performance():
                 """)
                 all_trades = cur.fetchall()
 
-        total_trades   = len(all_trades)
-        wins           = sum(1 for t in all_trades if t.get("outcome") == "win")
-        losses         = sum(1 for t in all_trades if t.get("outcome") == "loss")
-        win_rate       = (wins / total_trades * 100) if total_trades > 0 else 0
-        total_invested = sum(float(t.get("bet_size", 0)) for t in all_trades)
-        total_returned = sum(float(t.get("payout", 0) or 0) for t in all_trades)
-        total_pnl      = sum(float(t.get("realized_pnl", 0) or 0) for t in all_trades)
-        roi            = (total_pnl / total_invested * 100) if total_invested > 0 else 0
-        avg_trade_size = total_invested / total_trades if total_trades > 0 else 0
+                # Today trades
+                cur.execute("""
+                    SELECT COUNT(*) as cnt,
+                           COALESCE(SUM(realized_pnl), 0) as pnl
+                    FROM trades
+                    WHERE DATE(executed_at) = %s
+                """, (today,))
+                row = cur.fetchone()
+                today_trades = int(row["cnt"] or 0)
+                today_pnl    = float(row["pnl"] or 0)
 
-        if all_trades:
-            best_trade  = max(all_trades, key=lambda t: float(t.get("realized_pnl", 0) or 0))
-            worst_trade = min(all_trades, key=lambda t: float(t.get("realized_pnl", 0) or 0))
+        # Stats
+        total_trades = len(all_trades)
+        wins         = sum(1 for t in all_trades if (t.get("outcome") or "").lower() == "win")
+        losses       = sum(1 for t in all_trades if (t.get("outcome") or "").lower() == "loss")
+        win_rate     = (wins / total_trades * 100) if total_trades > 0 else 0.0
+        total_pnl    = sum(float(t.get("realized_pnl") or 0) for t in all_trades)
+        total_bets   = sum(float(t.get("bet_size") or 0) for t in all_trades)
+        avg_bet_size = total_bets / total_trades if total_trades > 0 else 0.0
 
-        chart_dates   = [str(d["date"]) for d in reversed(daily_stats)]
-        chart_pnl     = [float(d.get("realized_pnl", 0) or 0) for d in reversed(daily_stats)]
-        chart_winrate = [float(d.get("win_rate", 0) or 0) for d in reversed(daily_stats)]
+        # Max drawdown — largest single loss
+        losses_list  = [float(t.get("realized_pnl") or 0) for t in all_trades if (t.get("realized_pnl") or 0) < 0]
+        max_drawdown = abs(min(losses_list)) if losses_list else 0.0
+
+        # Best and worst trades
+        closed_with_pnl = [t for t in all_trades if t.get("realized_pnl") is not None]
+        best_trades  = sorted(closed_with_pnl, key=lambda t: float(t.get("realized_pnl") or 0), reverse=True)[:5]
+        worst_trades = sorted(closed_with_pnl, key=lambda t: float(t.get("realized_pnl") or 0))[:5]
 
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"Performance DB error: {e}")
 
     return render_template('performance.html',
-        daily_stats    = daily_stats,
-        total_trades   = total_trades,
-        wins           = wins,
-        losses         = losses,
-        win_rate       = round(win_rate, 1),
-        total_invested = round(total_invested, 2),
-        total_returned = round(total_returned, 2),
-        total_pnl      = round(total_pnl, 2),
-        roi            = round(roi, 1),
-        best_trade     = best_trade,
-        worst_trade    = worst_trade,
-        avg_trade_size = round(avg_trade_size, 2),
-        chart_dates    = chart_dates,
-        chart_pnl      = chart_pnl,
-        chart_winrate  = chart_winrate,
+        daily_performance = daily_performance,
+        best_trades       = best_trades,
+        worst_trades      = worst_trades,
+        total_trades      = total_trades,
+        wins              = wins,
+        losses            = losses,
+        win_rate          = round(win_rate, 1),
+        total_pnl         = round(total_pnl, 2),
+        today_pnl         = round(today_pnl, 2),
+        today_trades      = today_trades,
+        avg_bet_size      = round(avg_bet_size, 2),
+        max_drawdown      = round(max_drawdown, 2),
     )
