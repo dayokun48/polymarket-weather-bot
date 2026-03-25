@@ -48,6 +48,7 @@ from executors.polymarket_trader        import PolymarketTrader
 from executors.position_tracker         import PositionTracker
 from notifications.telegram_bot         import TelegramBot
 from notifications.telegram_handler     import TelegramHandler
+from new_market_monitor                 import FreshMarketMonitor
 
 noaa             = NOAACollector()
 polymarket       = PolymarketCollector()
@@ -57,7 +58,8 @@ risk_mgr         = RiskManager(arbitrage_calc)
 telegram         = TelegramBot()
 trader           = PolymarketTrader()
 position_tracker = PositionTracker()
-tg_handler: TelegramHandler = None   # diinit setelah scan_for_opportunities didefinisikan
+tg_handler: TelegramHandler = None
+fresh_monitor: FreshMarketMonitor = None
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 try:
@@ -124,6 +126,13 @@ def scan_for_opportunities():
         auto_threshold    = config.AUTO_TRADE_THRESHOLD()
         total_signals     = 0
         total_auto_trades = 0
+
+        # Step 0: Scan fresh bracket markets (harus sebelum NO flood)
+        if fresh_monitor:
+            logger.info("🆕 Scanning fresh bracket markets...")
+            fresh_count = fresh_monitor.scan_fresh_markets()
+            if fresh_count:
+                logger.info(f"🆕 {fresh_count} fresh market diproses")
 
         # Step 1: Fetch + simpan markets
         logger.info("📡 Fetching weather markets...")
@@ -324,6 +333,11 @@ if __name__ == "__main__":
             f"   CLOB ready           : {'✅ Live trading' if config.CLOB_IS_READY() else '⚠️  Simulation mode'}"
         )
 
+        # 5b. Init Fresh Market Monitor
+        logger.info("🆕 Starting Fresh Market Monitor...")
+        globals()["fresh_monitor"] = FreshMarketMonitor(weather_analyzer, trader, telegram)
+        logger.info(f"✅ Fresh Market Monitor ready — window={config.FRESH_MARKET_WINDOW()}min bet=${config.FRESH_MARKET_AUTO_BET()}/bracket")
+
         # 6. Scheduler
         logger.info("⏰ Starting scheduler...")
         from apscheduler.schedulers.background import BackgroundScheduler
@@ -346,7 +360,8 @@ if __name__ == "__main__":
         logger.info(f"   Interval   : {config.CHECK_INTERVAL_MINUTES()} menit")
         logger.info(f"   Min edge   : {config.MIN_EDGE_PCT()}%")
         logger.info(f"   Min conf   : {config.MIN_CONFIDENCE_PCT()}%")
-        logger.info(f"   Auto-trade : conf ≥ {config.AUTO_TRADE_THRESHOLD():.0f}% → ${config.AUTO_TRADE_AMOUNT():.0f}")
+        logger.info(f"   Auto-trade : conf 2265 {config.AUTO_TRADE_THRESHOLD():.0f}% 2192 ${config.AUTO_TRADE_AMOUNT():.0f}")
+        logger.info(f"   Fresh mkt  : window={config.FRESH_MARKET_WINDOW()}min bet=${config.FRESH_MARKET_AUTO_BET()}/bracket")
         logger.info(f"   Dashboard  : http://localhost:{config.FLASK_PORT}")
         logger.info("=" * 60)
 

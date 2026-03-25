@@ -73,6 +73,10 @@ SETTING_DEFAULTS = {
     "min_market_liquidity":   "500",        # minimum likuiditas USD
     "min_time_left_hours":    "1",          # abaikan market yang tutup < 1 jam
     "max_time_left_hours":    "72",         # abaikan market yang tutup > 72 jam
+    "auto_trade_threshold":   "90",         # confidence >= ini → auto-execute
+    "auto_trade_amount":      "5",          # USD per auto-trade
+    "fresh_market_window_minutes": "5",     # window fresh market (menit)
+    "fresh_market_auto_bet":  "1",          # USD per bracket saat fresh market
 }
 
 # Cache runtime — diisi oleh load_settings_from_db()
@@ -150,6 +154,8 @@ def MAX_TIME_LEFT_HOURS():      return get("max_time_left_hours",    float)
 def AUTO_TRADE_THRESHOLD():     return get("auto_trade_threshold",  float)
 def AUTO_TRADE_AMOUNT():        return get("auto_trade_amount",     float)
 def CLOB_IS_READY():            return bool(CLOB_API_KEY and CLOB_SECRET and CLOB_PASSPHRASE)
+def FRESH_MARKET_WINDOW():      return get("fresh_market_window_minutes", int)
+def FRESH_MARKET_AUTO_BET():    return get("fresh_market_auto_bet",      float)
 
 
 # ── Validasi ───────────────────────────────────────────────────────────────────

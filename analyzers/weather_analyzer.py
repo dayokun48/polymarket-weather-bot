@@ -150,6 +150,9 @@ class WeatherAnalyzer:
                 f"| confidence={consensus['confidence']}%"
             )
 
+            # Cari bracket yang paling cocok dengan forecast (predicted winner)
+            best_bracket_id = self._find_best_bracket(event, avg_temp)
+
             for bracket in event.get("brackets", []):
                 if not self._passes_market_filter(bracket):
                     continue
@@ -158,28 +161,85 @@ class WeatherAnalyzer:
                 if weather_prob is None:
                     continue
 
-                signal = self._build_signal(
-                    market       = bracket,
-                    weather_prob = weather_prob,
-                    consensus    = consensus,
-                    target_date  = target_date,
-                    signal_type  = "weather_temperature_bracket",
-                    location     = location,
-                    extra        = {
-                        "bracket_label":     bracket.get("group_title", ""),
-                        "event_title":       title,
-                        "event_url":         event.get("url", ""),
-                        "forecast_temp":     avg_temp,
-                        "resolution_source": event.get("resolution_source", ""),
-                    }
-                )
-                if signal:
-                    signals.append(signal)
+                is_predicted_winner = (bracket.get("id") == best_bracket_id)
+
+                # Untuk predicted winner → paksa direction YES jika confidence tinggi
+                # Ini lebih profitable dari NO flooding (payout bisa 100x vs 2x)
+                if is_predicted_winner and consensus.get("confidence", 0) >= 70:
+                    signal = self._build_signal(
+                        market       = bracket,
+                        weather_prob = weather_prob,
+                        consensus    = consensus,
+                        target_date  = target_date,
+                        signal_type  = "weather_temperature_bracket",
+                        location     = location,
+                        extra        = {
+                            "bracket_label":     bracket.get("group_title", ""),
+                            "event_title":       title,
+                            "event_url":         event.get("url", ""),
+                            "forecast_temp":     avg_temp,
+                            "resolution_source": event.get("resolution_source", ""),
+                            "is_predicted_winner": True,
+                        }
+                    )
+                    if signal:
+                        # Override direction ke YES untuk predicted winner
+                        signal["direction"] = "YES"
+                        signal["current_price"] = bracket.get("yes_price", 0.5)
+                        signals.append(signal)
+                else:
+                    signal = self._build_signal(
+                        market       = bracket,
+                        weather_prob = weather_prob,
+                        consensus    = consensus,
+                        target_date  = target_date,
+                        signal_type  = "weather_temperature_bracket",
+                        location     = location,
+                        extra        = {
+                            "bracket_label":     bracket.get("group_title", ""),
+                            "event_title":       title,
+                            "event_url":         event.get("url", ""),
+                            "forecast_temp":     avg_temp,
+                            "resolution_source": event.get("resolution_source", ""),
+                            "is_predicted_winner": False,
+                        }
+                    )
+                    if signal:
+                        signals.append(signal)
 
         except Exception as e:
             logger.error(f"Error _analyze_bracket {event.get('title')}: {e}")
 
         return signals
+
+    def _find_best_bracket(self, event: Dict, forecast_temp: float) -> Optional[str]:
+        """
+        Cari bracket_id yang paling cocok dengan forecast temperature.
+        Returns market_id dari bracket winner atau None.
+        """
+        import re
+        best_id   = None
+        best_diff = float("inf")
+
+        for bracket in event.get("brackets", []):
+            label = (bracket.get("group_title") or bracket.get("question", "")).lower()
+            # Extract suhu dari label, misal "17°C", "17-18°C", "52°F"
+            nums = re.findall(r"[\d.]+", label)
+            if not nums:
+                continue
+            try:
+                temp = float(nums[0])
+                # Convert Fahrenheit jika perlu
+                if "f" in label or "°f" in label:
+                    temp = (temp - 32) * 5 / 9
+                diff = abs(temp - forecast_temp)
+                if diff < best_diff:
+                    best_diff = diff
+                    best_id   = bracket.get("id")
+            except ValueError:
+                continue
+
+        return best_id
 
     # ── Probability helpers ────────────────────────────────────────────────────
 
