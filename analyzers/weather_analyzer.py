@@ -326,6 +326,15 @@ class WeatherAnalyzer:
         if not market.get("accepting_orders", True):
             return False
 
+        # FIX: filter harga ekstrem — near-certain outcome, EV tidak realistis
+        # Market price 0.1% = trader lain sudah sangat yakin, signal tidak valid
+        yes_price = market.get("yes_price", 0.5)
+        no_price  = market.get("no_price", 0.5)
+        if yes_price < 0.02 or yes_price > 0.98:
+            return False
+        if no_price < 0.02 or no_price > 0.98:
+            return False
+
         end_date = market.get("end_date")
         if end_date:
             now = datetime.now(timezone.utc)
