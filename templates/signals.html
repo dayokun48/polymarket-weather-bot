@@ -1,89 +1,159 @@
 {% extends "base.html" %}
 {% block title %}Signals — WeatherBot{% endblock %}
-{% block page_title %}Trading Signals{% endblock %}
-{% block content %}
 
-<div class="kpi-grid" style="grid-template-columns:repeat(6,1fr);margin-bottom:20px;">
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">🔔 Trading Signals</h1>
+  <span class="page-time" id="clock"></span>
+</div>
+
+<!-- KPI Cards -->
+<div class="kpi-row">
   <div class="kpi-card">
-    <div class="kpi-label">Total</div>
+    <div class="kpi-label">TOTAL</div>
     <div class="kpi-value">{{ total_signals }}</div>
   </div>
-  <div class="kpi-card yellow">
-    <div class="kpi-label">Pending</div>
-    <div class="kpi-value" style="color:var(--yellow)">{{ pending_signals }}</div>
+  <div class="kpi-card">
+    <div class="kpi-label">PENDING</div>
+    <div class="kpi-value yellow">{{ pending_signals }}</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Executed</div>
-    <div class="kpi-value" style="color:var(--blue)">{{ executed_signals }}</div>
+    <div class="kpi-label">EXECUTED</div>
+    <div class="kpi-value blue">{{ executed_signals }}</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Skipped</div>
-    <div class="kpi-value" style="color:var(--text-muted)">{{ skipped_signals }}</div>
-  </div>
-  <div class="kpi-card green">
-    <div class="kpi-label">Avg Edge</div>
-    <div class="kpi-value green">{{ "%.1f"|format(avg_edge) }}%</div>
+    <div class="kpi-label">SKIPPED</div>
+    <div class="kpi-value">{{ skipped_signals }}</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">Avg Conf</div>
-    <div class="kpi-value">{{ "%.1f"|format(avg_confidence) }}%</div>
+    <div class="kpi-label">🆕 FRESH</div>
+    <div class="kpi-value green">{{ fresh_signals }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">📊 VOLUME</div>
+    <div class="kpi-value blue">{{ volume_signals }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">AVG EDGE</div>
+    <div class="kpi-value {% if avg_edge > 0 %}green{% endif %}">{{ avg_edge }}%</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">AVG CONF</div>
+    <div class="kpi-value">{{ avg_confidence }}%</div>
   </div>
 </div>
 
+<!-- Filters -->
 <div class="filter-bar">
-  <form method="get" style="display:contents;">
-    <select name="status" onchange="this.form.submit()">
+  <form method="GET" class="filter-form">
+    <select name="status" class="filter-select" onchange="this.form.submit()">
       <option value="all"      {% if status_filter=='all'      %}selected{% endif %}>All Status</option>
       <option value="pending"  {% if status_filter=='pending'  %}selected{% endif %}>Pending</option>
       <option value="executed" {% if status_filter=='executed' %}selected{% endif %}>Executed</option>
       <option value="skipped"  {% if status_filter=='skipped'  %}selected{% endif %}>Skipped</option>
     </select>
-    <select name="days" onchange="this.form.submit()">
+    <select name="type" class="filter-select" onchange="this.form.submit()">
+      <option value="all"    {% if type_filter=='all'    %}selected{% endif %}>All Types</option>
+      <option value="fresh"  {% if type_filter=='fresh'  %}selected{% endif %}>🆕 Fresh Market</option>
+      <option value="volume" {% if type_filter=='volume' %}selected{% endif %}>📊 Volume Signal</option>
+    </select>
+    <select name="days" class="filter-select" onchange="this.form.submit()">
       <option value="1"  {% if days_filter==1  %}selected{% endif %}>Last 24h</option>
+      <option value="3"  {% if days_filter==3  %}selected{% endif %}>Last 3 days</option>
       <option value="7"  {% if days_filter==7  %}selected{% endif %}>Last 7 days</option>
-      <option value="30" {% if days_filter==30 %}selected{% endif %}>Last 30 days</option>
     </select>
   </form>
 </div>
 
-<div class="section">
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>Date</th>
-        <th>Location</th>
-        <th>Market</th>
-        <th>Dir</th>
-        <th>Forecast</th>
-        <th>Market Odds</th>
-        <th>Edge</th>
-        <th>Confidence</th>
-        <th>Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for s in signals %}
-      <tr>
-        <td class="td-mono" style="font-size:11px;color:var(--text-muted);white-space:nowrap">
-          {% if s.created_at %}{{ s.created_at.strftime('%m/%d %H:%M') }}{% endif %}
-        </td>
-        <td style="color:var(--cyan);font-size:12px;white-space:nowrap">{{ s.location or '—' }}</td>
-        <td class="td-market td-primary">{{ (s.market_question or '')[:55] }}...</td>
-        <td>
-          <span class="badge badge-{{ s.direction.lower() if s.direction else 'no' }}">{{ s.direction or '—' }}</span>
-        </td>
-        <td class="td-mono">{{ "%.0f"|format(s.noaa_probability or 0) }}%</td>
-        <td class="td-mono" style="color:var(--text-muted)">{{ "%.0f"|format(s.market_probability or 0) }}%</td>
-        <td class="td-mono positive"><strong>+{{ "%.0f"|format(s.edge or 0) }}%</strong></td>
-        <td class="td-mono">{{ "%.0f"|format(s.confidence or 0) }}%</td>
-        <td><span class="badge badge-{{ s.status or 'pending' }}">{{ s.status or 'pending' }}</span></td>
-      </tr>
-      {% endfor %}
-      {% if not signals %}
-      <tr><td colspan="9"><div class="empty-state"><div class="empty-icon">🔔</div>No signals found</div></td></tr>
-      {% endif %}
-    </tbody>
-  </table>
+<!-- Table -->
+<div class="card">
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>DATE</th>
+          <th>LOCATION</th>
+          <th>TYPE</th>
+          <th>MARKET</th>
+          <th>DIR</th>
+          <th>BRACKET</th>
+          <th>VOL SHARE</th>
+          <th>MARKET ODDS</th>
+          <th>EDGE</th>
+          <th>CONFIDENCE</th>
+          <th>STATUS</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in signals %}
+        <tr>
+          <td class="mono text-dim">
+            {{ s.created_at.strftime('%m/%d %H:%M') if s.created_at else '—' }}
+          </td>
+          <td class="text-blue">{{ s.location or '—' }}</td>
+          <td>
+            {% if s.signal_type == 'fresh_market_bracket' %}
+              <span class="badge badge-green">🆕 Fresh</span>
+            {% elif s.signal_type == 'volume_distribution' %}
+              <span class="badge badge-blue">📊 Volume</span>
+            {% else %}
+              <span class="badge">{{ s.signal_type or '—' }}</span>
+            {% endif %}
+          </td>
+          <td class="text-sm">
+            {% if s.market_url %}
+              <a href="{{ s.market_url }}" target="_blank" class="table-link">
+                {{ (s.market_question or s.reasoning or '—')[:50] }}...
+              </a>
+            {% else %}
+              {{ (s.market_question or '—')[:50] }}
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge {% if s.direction=='YES' %}badge-green{% else %}badge-red{% endif %}">
+              {{ s.direction }}
+            </span>
+          </td>
+          <td class="mono text-sm">{{ s.reasoning[:30] if s.reasoning else '—' }}</td>
+          <td class="mono">
+            {% set vol = s.noaa_probability|float %}
+            {% if vol > 0 %}
+              <span class="{% if vol >= 40 %}text-green{% elif vol >= 25 %}text-yellow{% else %}text-dim{% endif %}">
+                {{ vol|round(0)|int }}%
+              </span>
+            {% else %}—{% endif %}
+          </td>
+          <td class="mono">{{ s.market_probability|round(1) if s.market_probability else '—' }}%</td>
+          <td class="mono">
+            <span class="{% if s.edge|float >= 30 %}text-green{% elif s.edge|float >= 15 %}text-yellow{% else %}text-dim{% endif %}">
+              +{{ s.edge|round(0)|int if s.edge else 0 }}%
+            </span>
+          </td>
+          <td class="mono">
+            <span class="{% if s.confidence|float >= 80 %}text-green{% elif s.confidence|float >= 60 %}text-yellow{% else %}text-dim{% endif %}">
+              {{ s.confidence|round(0)|int if s.confidence else 0 }}%
+            </span>
+          </td>
+          <td>
+            {% set st = s.status or 'pending' %}
+            <span class="badge
+              {% if st=='executed' %}badge-green
+              {% elif st=='pending' %}badge-yellow
+              {% elif st=='skipped' %}badge-red
+              {% else %}badge-dim{% endif %}">
+              {{ st }}
+            </span>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="11" class="empty-state">
+            <span>🔔</span><br>No signals found
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
-
 {% endblock %}

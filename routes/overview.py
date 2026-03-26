@@ -1,8 +1,8 @@
 """
-Overview/Dashboard Route
+Overview/Dashboard Route — updated for volume-based strategy
 """
 from flask import Blueprint, render_template
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pymysql
 import config
 
@@ -13,79 +13,80 @@ def _get_conn():
     return pymysql.connect(
         host=config.DB_HOST, port=config.DB_PORT,
         user=config.DB_USER, password=config.DB_PASSWORD,
-        database=config.DB_NAME,
-        charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
-        connect_timeout=5,
+        database=config.DB_NAME, charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor, connect_timeout=5,
     )
 
 
 @overview_bp.route('/')
 def index():
-    today     = datetime.now().date()
-    yesterday = datetime.now() - timedelta(days=1)
+    today       = datetime.now().date()
     today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-    today_perf         = None
-    recent_signals     = []
-    open_trades        = []
-    recent_trades      = []
-    total_signals_today = 0
-    total_exposure     = 0.0
-    total_trades       = 0
-    wins               = 0
-    win_rate           = 0.0
-    total_pnl          = 0.0
+    today_perf              = None
+    recent_signals          = []
+    open_trades             = []
+    total_signals_today     = 0
+    fresh_signals_today     = 0
+    volume_signals_today    = 0
+    total_exposure          = 0.0
+    total_trades            = wins = 0
+    win_rate                = total_pnl = 0.0
+    next_fresh_scan         = "~setiap 10 menit"
+    next_pre_closing        = "06:00 & 08:00 UTC"
 
     try:
         conn = _get_conn()
         with conn:
             with conn.cursor() as cur:
-                # Today's performance
+                # Today performance
                 cur.execute("SELECT * FROM daily_performance WHERE date = %s", (today,))
                 today_perf = cur.fetchone()
 
-                # Recent signals last 24h
+                # Recent signals 24h
                 cur.execute("""
-                    SELECT s.*, m.question as market_question
+                    SELECT s.id, s.location, s.direction, s.edge, s.confidence,
+                           s.signal_type, s.status, s.created_at,
+                           s.reasoning, m.question as market_question
                     FROM signals s
                     LEFT JOIN markets m ON s.market_id = m.id
                     WHERE s.created_at >= %s
-                    ORDER BY s.created_at DESC LIMIT 5
-                """, (yesterday,))
+                    ORDER BY s.created_at DESC
+                    LIMIT 10
+                """, (today_start,))
                 recent_signals = cur.fetchall()
+
+                # Signal counts today
+                cur.execute("SELECT COUNT(*) as cnt FROM signals WHERE created_at >= %s", (today_start,))
+                total_signals_today = cur.fetchone()["cnt"]
+
+                cur.execute("""
+                    SELECT COUNT(*) as cnt FROM signals
+                    WHERE created_at >= %s AND signal_type = 'fresh_market_bracket'
+                """, (today_start,))
+                fresh_signals_today = cur.fetchone()["cnt"]
+
+                cur.execute("""
+                    SELECT COUNT(*) as cnt FROM signals
+                    WHERE created_at >= %s AND signal_type = 'volume_distribution'
+                """, (today_start,))
+                volume_signals_today = cur.fetchone()["cnt"]
 
                 # Open trades
                 cur.execute("""
                     SELECT t.*, m.question as market_question
-                    FROM trades t
-                    LEFT JOIN markets m ON t.market_id = m.id
+                    FROM trades t LEFT JOIN markets m ON t.market_id = m.id
                     WHERE t.status = 'open'
+                    ORDER BY t.executed_at DESC
+                    LIMIT 10
                 """)
                 open_trades = cur.fetchall()
 
-                # Recent trades
+                # All-time stats
                 cur.execute("""
-                    SELECT t.*, m.question as market_question
-                    FROM trades t
-                    LEFT JOIN markets m ON t.market_id = m.id
-                    ORDER BY t.executed_at DESC LIMIT 5
-                """)
-                recent_trades = cur.fetchall()
-
-                # Signals today
-                cur.execute(
-                    "SELECT COUNT(*) as cnt FROM signals WHERE created_at >= %s",
-                    (today_start,)
-                )
-                total_signals_today = cur.fetchone()["cnt"]
-
-                # All-time closed stats — FIX: outcome 'win' lowercase
-                cur.execute("""
-                    SELECT
-                        COUNT(*) as total,
-                        SUM(outcome = 'win') as wins,
-                        SUM(realized_pnl) as total_pnl
+                    SELECT COUNT(*) as total,
+                           SUM(outcome = 'win') as wins,
+                           COALESCE(SUM(realized_pnl), 0) as total_pnl
                     FROM trades WHERE status = 'closed'
                 """)
                 row = cur.fetchone()
@@ -101,14 +102,22 @@ def index():
         logging.getLogger(__name__).error(f"Overview DB error: {e}")
 
     return render_template('overview.html',
-        today_perf          = today_perf,
-        recent_signals      = recent_signals,
-        open_trades         = open_trades,
-        recent_trades       = recent_trades,
-        total_signals_today = total_signals_today,
+        today_perf           = today_perf,
+        recent_signals       = recent_signals,
+        open_trades          = open_trades,
+        total_signals_today  = total_signals_today,
+        fresh_signals_today  = fresh_signals_today,
+        volume_signals_today = volume_signals_today,
         total_open_positions = len(open_trades),
-        total_exposure      = total_exposure,
-        total_trades        = total_trades,
-        win_rate            = round(win_rate, 1),
-        total_pnl           = round(total_pnl, 2),
+        total_exposure       = total_exposure,
+        total_trades         = total_trades,
+        win_rate             = round(win_rate, 1),
+        total_pnl            = round(total_pnl, 2),
+        next_fresh_scan      = next_fresh_scan,
+        next_pre_closing     = next_pre_closing,
+        automation_mode      = config.AUTOMATION_MODE(),
+        auto_threshold       = config.AUTO_TRADE_THRESHOLD(),
+        auto_amount          = config.AUTO_TRADE_AMOUNT(),
+        fresh_bet            = config.FRESH_MARKET_AUTO_BET(),
+        pre_closing_hours    = config.PRE_CLOSING_HOURS(),
     )

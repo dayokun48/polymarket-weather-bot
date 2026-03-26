@@ -1,5 +1,5 @@
 """
-Markets Route - filter past markets, pass now to template
+Markets Route — updated with hours_left display
 """
 from flask import Blueprint, render_template, request
 from datetime import datetime, timezone
@@ -13,17 +13,15 @@ def _get_conn():
     return pymysql.connect(
         host=config.DB_HOST, port=config.DB_PORT,
         user=config.DB_USER, password=config.DB_PASSWORD,
-        database=config.DB_NAME,
-        charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
-        connect_timeout=5,
+        database=config.DB_NAME, charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor, connect_timeout=5,
     )
 
 
 @markets_bp.route('/markets')
 def list_markets():
     search   = request.args.get('search', '')
-    sort     = request.args.get('sort', 'volume')
+    sort     = request.args.get('sort', 'end_date')
     page     = int(request.args.get('page', 1))
     per_page = 50
     offset   = (page - 1) * per_page
@@ -38,37 +36,42 @@ def list_markets():
         conn = _get_conn()
         with conn:
             with conn.cursor() as cur:
-
-                # Base WHERE — hanya tampilkan market yang belum expired
-                where = "WHERE (end_date IS NULL OR end_date > %s)"
+                where = ["(end_date IS NULL OR end_date > %s)"]
                 args  = [now]
 
                 if search:
-                    where += " AND question LIKE %s"
+                    where.append("question LIKE %s")
                     args.append(f"%{search}%")
 
+                # Filter hanya weather bracket market
+                where.append("(question LIKE %s OR question LIKE %s)")
+                args += ["%temperature%", "%°C%"]
+
+                where_str = "WHERE " + " AND ".join(where)
+
                 order = {
+                    "end_date":  "end_date ASC",
                     "volume":    "volume DESC",
                     "liquidity": "liquidity DESC",
-                    "end_date":  "end_date ASC",
                     "newest":    "first_seen DESC",
-                }.get(sort, "volume DESC")
+                }.get(sort, "end_date ASC")
 
-                cur.execute(f"SELECT COUNT(*) as cnt FROM markets {where}", args)
+                cur.execute(f"SELECT COUNT(*) as cnt FROM markets {where_str}", args)
                 total = cur.fetchone()["cnt"]
 
                 cur.execute(f"""
                     SELECT SUM(volume) as tv, SUM(liquidity) as tl
-                    FROM markets {where}
+                    FROM markets {where_str}
                 """, args)
                 row = cur.fetchone()
                 total_vol = float(row["tv"] or 0)
                 total_liq = float(row["tl"] or 0)
 
                 cur.execute(f"""
-                    SELECT id, question, end_date, volume, liquidity, url
-                    FROM markets
-                    {where}
+                    SELECT id, question, end_date, volume, liquidity, url,
+                           yes_price, no_price,
+                           TIMESTAMPDIFF(HOUR, NOW(), end_date) as hours_left
+                    FROM markets {where_str}
                     ORDER BY {order}
                     LIMIT %s OFFSET %s
                 """, args + [per_page, offset])
