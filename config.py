@@ -62,22 +62,18 @@ LOG_FILE  = os.getenv("LOG_FILE",  "logs/weather_bot.log")
 # Setelah migrate_bot_settings.py dijalankan, defaults ini tidak pernah dipakai.
 SETTING_DEFAULTS = {
     "automation_mode":        "semi-auto",  # manual | semi-auto | full-auto
-    "min_edge_pct":           "15",         # minimum edge % untuk alert/trade
-    "min_confidence_pct":     "80",         # minimum confidence dari weather consensus
     "max_bet_pct":            "5",          # % maksimal bankroll per trade
     "max_daily_trades":       "10",         # batas trade per hari
     "max_daily_loss_pct":     "10",         # batas loss per hari dalam %
-    "check_interval_minutes": "120",        # interval cek market
     "alert_cooldown_seconds": "300",        # jeda antar alert Telegram
-    "min_market_volume":      "1000",       # minimum volume market USD
-    "min_market_liquidity":   "500",        # minimum likuiditas USD
-    "min_time_left_hours":    "1",          # abaikan market yang tutup < 1 jam
-    "max_time_left_hours":    "72",         # abaikan market yang tutup > 72 jam
     "auto_trade_threshold":   "90",         # confidence >= ini → auto-execute
     "auto_trade_amount":      "5",          # USD per auto-trade
     "fresh_market_window_minutes": "5",     # window fresh market (menit)
     "fresh_market_auto_bet":  "1",          # USD per bracket saat fresh market
     "fresh_market_scan_interval": "10",     # interval scan fresh market (menit)
+    "pre_closing_hours":      "4",          # jam sebelum closing untuk volume scan
+    "min_volume_signal":      "1000",       # minimum volume bracket untuk signal
+    "volume_edge_threshold":  "20",         # minimum edge % dari volume distribution
 }
 
 # Cache runtime — diisi oleh load_settings_from_db()
@@ -140,24 +136,19 @@ def get(key: str, cast=str):
 # ── Shortcut functions (agar kode lain tidak perlu berubah) ───────────────────
 
 def AUTOMATION_MODE():          return get("automation_mode")
-def MIN_EDGE_PCT():             return get("min_edge_pct",           float)
-def MIN_CONFIDENCE_PCT():       return get("min_confidence_pct",     float)
 def MAX_BET_PCT():              return get("max_bet_pct",            float)
 def MAX_DAILY_TRADES():         return get("max_daily_trades",       int)
 def MAX_DAILY_LOSS_PCT():       return get("max_daily_loss_pct",     float)
-def CHECK_INTERVAL_MINUTES():   return get("check_interval_minutes", int)
-def CHECK_INTERVAL_SECONDS():   return get("check_interval_minutes", int) * 60
 def ALERT_COOLDOWN_SECONDS():   return get("alert_cooldown_seconds", int)
-def MIN_MARKET_VOLUME():        return get("min_market_volume",      float)
-def MIN_MARKET_LIQUIDITY():     return get("min_market_liquidity",   float)
-def MIN_TIME_LEFT_HOURS():      return get("min_time_left_hours",    float)
-def MAX_TIME_LEFT_HOURS():      return get("max_time_left_hours",    float)
-def AUTO_TRADE_THRESHOLD():     return get("auto_trade_threshold",  float)
-def AUTO_TRADE_AMOUNT():        return get("auto_trade_amount",     float)
+def AUTO_TRADE_THRESHOLD():     return get("auto_trade_threshold",   float)
+def AUTO_TRADE_AMOUNT():        return get("auto_trade_amount",      float)
 def CLOB_IS_READY():            return bool(CLOB_API_KEY and CLOB_SECRET and CLOB_PASSPHRASE)
 def FRESH_MARKET_WINDOW():      return get("fresh_market_window_minutes", int)
-def FRESH_MARKET_AUTO_BET():    return get("fresh_market_auto_bet",      float)
+def FRESH_MARKET_AUTO_BET():    return get("fresh_market_auto_bet",       float)
 def FRESH_MARKET_SCAN_INTERVAL(): return get("fresh_market_scan_interval", int)
+def PRE_CLOSING_HOURS():        return get("pre_closing_hours",       float)
+def MIN_VOLUME_SIGNAL():        return get("min_volume_signal",       float)
+def VOLUME_EDGE_THRESHOLD():    return get("volume_edge_threshold",   float)
 
 
 # ── Validasi ───────────────────────────────────────────────────────────────────

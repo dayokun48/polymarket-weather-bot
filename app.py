@@ -117,6 +117,52 @@ def _run_fresh_market_scan():
             logger.error(f"Fresh market scan error: {e}")
 
 
+def _run_pre_closing_scan():
+    """
+    Pre-closing volume analysis — scheduler 4 jam sebelum closing.
+    VolumeAnalyzer detect signal dari distribusi volume.
+    """
+    logger.info("📊 Pre-closing volume scan...")
+    try:
+        signals = weather_analyzer.find_opportunities()
+        if not signals:
+            logger.info("   Tidak ada signal volume")
+            return
+        logger.info(f"   {len(signals)} signal ditemukan")
+        for signal in signals:
+            try:
+                bankroll     = get_bankroll()
+                real_balance = trader.get_balance()
+                is_valid, reason = risk_mgr.validate_signal(signal, bankroll, real_balance)
+                if not is_valid:
+                    continue
+                bet_size  = risk_mgr.calculate_position_size(signal, bankroll)
+                signal["recommended_bet"] = bet_size
+                signal_id = risk_mgr.record_signal(signal, bet_size)
+                if not signal_id:
+                    continue
+                confidence = signal.get("confidence", 0)
+                mode = config.AUTOMATION_MODE()
+                if mode == "full-auto":
+                    result = trader.execute_trade(signal, signal_id, bet_size)
+                    if result:
+                        risk_mgr.record_trade(
+                            signal=signal, signal_id=signal_id,
+                            amount=bet_size, entry_price=signal.get("current_price", 0.5),
+                            tx_hash=result.get("tx_hash"),
+                        )
+                        telegram.send_execution_confirmation(result)
+                elif mode == "semi-auto" and confidence >= config.AUTO_TRADE_THRESHOLD() and tg_handler:
+                    tg_handler.auto_execute(signal, signal_id)
+                else:
+                    telegram.send_signal_alert(signal)
+            except Exception as e:
+                logger.error(f"   Signal error: {e}")
+    except Exception as e:
+        logger.error(f"_run_pre_closing_scan error: {e}", exc_info=True)
+
+
+
 def scan_for_opportunities():
     """
     Main bot loop.
@@ -350,36 +396,46 @@ if __name__ == "__main__":
         logger.info("⏰ Starting scheduler...")
         from apscheduler.schedulers.background import BackgroundScheduler
         scheduler = BackgroundScheduler()
+
+        # Fresh market scan — setiap 10 menit (window ~5 menit)
         scheduler.add_job(
-            func=scan_for_opportunities, trigger="interval",
-            seconds=config.CHECK_INTERVAL_SECONDS(),
-            id="weather_scan", name="Weather Scanner",
+            func=_run_fresh_market_scan, trigger="interval",
+            minutes=config.FRESH_MARKET_SCAN_INTERVAL(),
+            id="fresh_scan", name="Fresh Market Scanner",
         )
+
+        # Pre-closing volume scan — setiap hari jam 08:00 UTC (15:00 WIB)
+        # 4 jam sebelum market closing jam 12:00 UTC (19:00 WIB)
+        scheduler.add_job(
+            func=_run_pre_closing_scan, trigger="cron",
+            hour=8, minute=0,
+            id="pre_closing_scan", name="Pre-Closing Volume Scan",
+        )
+        # Juga jam 06:00 UTC (13:00 WIB) untuk market yang closing lebih awal
+        scheduler.add_job(
+            func=_run_pre_closing_scan, trigger="cron",
+            hour=6, minute=0,
+            id="pre_closing_scan_early", name="Pre-Closing Volume Scan (Early)",
+        )
+
+        # Reset harian
         scheduler.add_job(
             func=reset_daily_at_midnight, trigger="cron",
             hour=0, minute=0, id="daily_reset", name="Daily Reset",
         )
-        # Fresh market scan — interval lebih pendek (10 menit)
-        # Terpisah dari scan utama agar tidak miss window 5 menit
-        scheduler.add_job(
-            func=_run_fresh_market_scan,
-            trigger="interval",
-            minutes=config.FRESH_MARKET_SCAN_INTERVAL(),
-            id="fresh_scan",
-            name="Fresh Market Scanner",
-        )
+
         scheduler.start()
         globals()["bot_running"] = True
 
         logger.info("=" * 60)
         logger.info("✅ Bot running!")
-        logger.info(f"   Mode       : {config.AUTOMATION_MODE()}")
-        logger.info(f"   Interval   : {config.CHECK_INTERVAL_MINUTES()} menit")
-        logger.info(f"   Min edge   : {config.MIN_EDGE_PCT()}%")
-        logger.info(f"   Min conf   : {config.MIN_CONFIDENCE_PCT()}%")
-        logger.info(f"   Auto-trade : conf 2265 {config.AUTO_TRADE_THRESHOLD():.0f}% 2192 ${config.AUTO_TRADE_AMOUNT():.0f}")
-        logger.info(f"   Fresh mkt  : scan={config.FRESH_MARKET_SCAN_INTERVAL()}min window={config.FRESH_MARKET_WINDOW()}min bet=${config.FRESH_MARKET_AUTO_BET()}/bracket")
-        logger.info(f"   Dashboard  : http://localhost:{config.FLASK_PORT}")
+        logger.info(f"   Mode         : {config.AUTOMATION_MODE()}")
+        logger.info(f"   Fresh scan   : setiap {config.FRESH_MARKET_SCAN_INTERVAL()} menit")
+        logger.info(f"   Fresh window : {config.FRESH_MARKET_WINDOW()} menit")
+        logger.info(f"   Fresh bet    : ${config.FRESH_MARKET_AUTO_BET()}/bracket")
+        logger.info(f"   Pre-closing  : jam 06:00 & 08:00 UTC")
+        logger.info(f"   Auto-trade   : conf >= {config.AUTO_TRADE_THRESHOLD():.0f}% -> ${config.AUTO_TRADE_AMOUNT():.0f}")
+        logger.info(f"   Dashboard    : http://localhost:{config.FLASK_PORT}")
         logger.info("=" * 60)
 
         # 7. Initial scan (5 detik setelah start)
