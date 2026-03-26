@@ -77,6 +77,7 @@ SETTING_DEFAULTS = {
     "auto_trade_amount":      "5",          # USD per auto-trade
     "fresh_market_window_minutes": "5",     # window fresh market (menit)
     "fresh_market_auto_bet":  "1",          # USD per bracket saat fresh market
+    "fresh_market_scan_interval": "10",     # interval scan fresh market (menit)
 }
 
 # Cache runtime — diisi oleh load_settings_from_db()
@@ -156,6 +157,7 @@ def AUTO_TRADE_AMOUNT():        return get("auto_trade_amount",     float)
 def CLOB_IS_READY():            return bool(CLOB_API_KEY and CLOB_SECRET and CLOB_PASSPHRASE)
 def FRESH_MARKET_WINDOW():      return get("fresh_market_window_minutes", int)
 def FRESH_MARKET_AUTO_BET():    return get("fresh_market_auto_bet",      float)
+def FRESH_MARKET_SCAN_INTERVAL(): return get("fresh_market_scan_interval", int)
 
 
 # ── Validasi ───────────────────────────────────────────────────────────────────

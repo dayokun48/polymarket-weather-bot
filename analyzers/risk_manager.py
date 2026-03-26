@@ -85,9 +85,15 @@ class RiskManager:
         if self.consecutive_losses >= 3:
             return False, "3 loss berturut-turut — auto-pause aktif"
 
-        # FIX 1: Cek saldo real jika tersedia
+        # FIX: Cek saldo real jika tersedia
         if real_balance is not None:
-            min_bet = max(config.AUTO_TRADE_AMOUNT() if hasattr(config, 'AUTO_TRADE_AMOUNT') else 5.0, 1.0)
+            signal_type = signal.get("signal_type", "")
+            if "fresh_market" in signal_type:
+                # Fresh market bet lebih kecil ($1/bracket)
+                min_bet = config.FRESH_MARKET_AUTO_BET() if hasattr(config, 'FRESH_MARKET_AUTO_BET') else 1.0
+            else:
+                min_bet = config.AUTO_TRADE_AMOUNT() if hasattr(config, 'AUTO_TRADE_AMOUNT') else 5.0
+            min_bet = max(min_bet, 1.0)
             if real_balance < min_bet:
                 return False, f"Saldo real tidak cukup: ${real_balance:.2f} < ${min_bet:.2f}"
 

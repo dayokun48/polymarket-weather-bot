@@ -52,10 +52,15 @@ class PolymarketTrader:
                 key            = config.PRIVATE_KEY,
                 chain_id       = CHAIN_ID,
                 creds          = creds,
-                signature_type = 2,   # Gnosis Safe (proxy wallet)
+                signature_type = 2,
                 funder         = config.WALLET_ADDRESS,
             )
             logger.info(f"✅ CLOB client ready — funder: {config.WALLET_ADDRESS[:10]}...")
+
+            # Test balance saat init untuk verifikasi koneksi
+            bal = self.get_balance()
+            logger.info(f"💰 Initial balance: ${bal:.4f} USDC")
+
         except ImportError:
             logger.error("❌ py-clob-client tidak terinstall")
         except Exception as e:
@@ -183,29 +188,46 @@ class PolymarketTrader:
     # ── Balance ───────────────────────────────────────────────────────────────
 
     def get_balance(self) -> float:
-        """Ambil saldo USDC via CLOB API atau on-chain."""
-        if self._client:
-            try:
-                resp = self._client.get_balance_allowance()
-                return float(resp.get("balance", 0)) / 1e6
-            except Exception:
-                pass
+        """
+        Ambil saldo USDC.e dari proxy wallet via on-chain.
+        CLOB get_balance_allowance skip — ada bug di SDK (NoneType signature_type).
+        On-chain via public Polygon RPC — terbukti return $0.7889.
+        """
+        # Method 1: On-chain via public Polygon RPC (terbukti bekerja)
+        PUBLIC_RPCS = [
+            "https://rpc-mainnet.matic.quiknode.pro",
+            "https://polygon.llamarpc.com",
+            "https://rpc.ankr.com/polygon",
+        ]
+        wallet = config.WALLET_ADDRESS or ""
+        if not wallet:
+            return 0.0
 
-        # Fallback: on-chain via web3
         try:
             from web3 import Web3
-            from eth_account import Account
+            USDC_E = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+            abi    = [{"constant":True,"inputs":[{"name":"_owner","type":"address"}],
+                       "name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],
+                       "type":"function"}]
 
-            w3      = Web3(Web3.HTTPProvider("https://polygon-rpc.com"))
-            account = Account.from_key(config.PRIVATE_KEY)
-            usdc    = w3.eth.contract(
-                address=Web3.to_checksum_address("0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"),
-                abi=[{"constant":True,"inputs":[{"name":"_owner","type":"address"}],
-                      "name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]
-            )
-            return usdc.functions.balanceOf(account.address).call() / 1e6
-        except Exception:
-            return 0.0
+            for rpc in PUBLIC_RPCS:
+                try:
+                    w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 5}))
+                    if not w3.is_connected():
+                        continue
+                    usdc = w3.eth.contract(address=Web3.to_checksum_address(USDC_E), abi=abi)
+                    raw  = usdc.functions.balanceOf(Web3.to_checksum_address(wallet)).call()
+                    bal  = raw / 1e6
+                    logger.debug(f"Balance on-chain ({rpc[:30]}): ${bal:.4f}")
+                    return bal
+                except Exception:
+                    continue
+        except ImportError:
+            logger.warning("web3 tidak terinstall — balance tidak bisa dibaca")
+        except Exception as e:
+            logger.error(f"get_balance error: {e}")
+
+        return 0.0
 
     def is_ready(self) -> bool:
         return self._client is not None

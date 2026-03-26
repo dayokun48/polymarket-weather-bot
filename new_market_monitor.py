@@ -96,88 +96,137 @@ class FreshMarketMonitor:
     def _fetch_fresh_bracket_markets(self, window_minutes: int) -> List[Dict]:
         """
         Ambil bracket markets yang dibuka dalam window_minutes terakhir.
+        Cek /events DAN /markets untuk coverage lebih lengkap.
         Kriteria fresh:
           - age < window_minutes
-          - bracket masih ~50¢ (semua YES antara 30-70¢)
+          - bracket masih ~50¢ (avg YES antara 25-75¢)
           - ada minimal 3 bracket
         """
         fresh = []
-        now   = datetime.now(timezone.utc)
+        now    = datetime.now(timezone.utc)
         cutoff = now - timedelta(minutes=window_minutes)
+        seen   = set()
 
+        # ── Source 1: /events ─────────────────────────────────────────────────
         try:
             r = self.session.get(f"{GAMMA_API}/events", params={
-                "active":    "true",
-                "closed":    "false",
-                "limit":     100,
-                "order":     "startDate",
-                "ascending": "false",
+                "active": "true", "closed": "false",
+                "limit":  100, "order": "startDate", "ascending": "false",
             }, timeout=15)
-
             events = r.json() if isinstance(r.json(), list) else []
 
             for event in events:
                 title = (event.get("title") or "").lower()
-
-                # Hanya bracket temperature market
                 if not any(w in title for w in ["temperature", "highest temp", "°c", "°f"]):
                     continue
+                event_id = event.get("id", "")
+                if event_id in seen:
+                    continue
 
-                # Cek umur market
                 start_raw = event.get("startDate") or event.get("creationDate")
                 if not start_raw:
                     continue
                 try:
-                    start = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+                    start     = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+                    age_min   = (now - start).total_seconds() / 60
                     if start < cutoff:
                         continue
-                    event["_age_minutes"] = round((now - start).total_seconds() / 60, 1)
+                    event["_age_minutes"]  = round(age_min, 1)
+                    event["_source"]       = "events"
                 except Exception:
                     continue
 
-                # Ambil markets (brackets) dari event
                 markets = event.get("markets", [])
                 if len(markets) < 3:
                     continue
 
-                # Cek apakah masih fresh (YES price ~50¢)
-                yes_prices = []
-                for m in markets:
-                    import json
-                    outcomes = m.get("outcomes", [])
-                    prices   = m.get("outcomePrices", [])
-                    if isinstance(outcomes, str):
-                        try: outcomes = json.loads(outcomes)
-                        except: outcomes = []
-                    if isinstance(prices, str):
-                        try: prices = json.loads(prices)
-                        except: prices = []
-                    price_map = {str(o).lower(): _safe_float(p) for o, p in zip(outcomes, prices)}
-                    yes_p = price_map.get("yes", 0)
-                    if yes_p > 0:
-                        yes_prices.append(yes_p)
-
-                if not yes_prices:
-                    continue
-
-                avg_yes = sum(yes_prices) / len(yes_prices)
-
-                # Fresh jika rata-rata YES masih 25-75¢
+                avg_yes = self._get_avg_yes_price(markets)
                 if 0.25 <= avg_yes <= 0.75:
                     event["_avg_yes_price"] = round(avg_yes, 3)
                     event["_bracket_count"] = len(markets)
                     fresh.append(event)
-                    logger.info(
-                        f"🆕 Fresh: {event.get('title','')[:50]} "
-                        f"| age={event['_age_minutes']}min "
-                        f"| brackets={len(markets)} "
-                        f"| avg_yes={avg_yes:.2f}"
-                    )
+                    seen.add(event_id)
+                    logger.info(f"🆕 Fresh (events): {event.get('title','')[:50]} | age={age_min:.1f}min | avg_yes={avg_yes:.2f}")
 
         except Exception as e:
-            logger.error(f"_fetch_fresh_bracket_markets error: {e}")
+            logger.error(f"_fetch_fresh /events error: {e}")
+
+        # ── Source 2: /markets (untuk market tanpa event parent) ──────────────
+        try:
+            r = self.session.get(f"{GAMMA_API}/markets", params={
+                "active": "true", "closed": "false",
+                "limit":  200, "order": "startDate", "ascending": "false",
+            }, timeout=15)
+            markets_list = r.json() if isinstance(r.json(), list) else []
+
+            # Group by event/parent
+            from collections import defaultdict
+            groups: dict = defaultdict(list)
+            for m in markets_list:
+                title = (m.get("question") or "").lower()
+                if not any(w in title for w in ["temperature", "highest temp", "°c", "°f"]):
+                    continue
+                # Group by event slug (ambil dari question tanpa suhu)
+                import re
+                base = re.sub(r"\d+[°]?[CcFf].*", "", m.get("question","")).strip()
+                groups[base].append(m)
+
+            for base_title, group_markets in groups.items():
+                if len(group_markets) < 3:
+                    continue
+
+                # Cek age dari market pertama
+                start_raw = group_markets[0].get("startDate") or group_markets[0].get("createdAt")
+                if not start_raw:
+                    continue
+                try:
+                    start   = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+                    age_min = (now - start).total_seconds() / 60
+                    if start < cutoff:
+                        continue
+                except Exception:
+                    continue
+
+                avg_yes  = self._get_avg_yes_price(group_markets)
+                event_id = f"market_group_{base_title[:30]}"
+
+                if 0.25 <= avg_yes <= 0.75 and event_id not in seen:
+                    synthetic_event = {
+                        "id":              event_id,
+                        "title":           base_title[:60],
+                        "markets":         group_markets,
+                        "_age_minutes":    round(age_min, 1),
+                        "_avg_yes_price":  round(avg_yes, 3),
+                        "_bracket_count":  len(group_markets),
+                        "_source":         "markets",
+                    }
+                    fresh.append(synthetic_event)
+                    seen.add(event_id)
+                    logger.info(f"🆕 Fresh (markets): {base_title[:50]} | age={age_min:.1f}min | avg_yes={avg_yes:.2f}")
+
+        except Exception as e:
+            logger.error(f"_fetch_fresh /markets error: {e}")
 
         return fresh
+
+    def _get_avg_yes_price(self, markets: List[Dict]) -> float:
+        """Hitung rata-rata YES price dari list bracket markets."""
+        import json
+        yes_prices = []
+        for m in markets:
+            outcomes = m.get("outcomes", [])
+            prices   = m.get("outcomePrices", [])
+            if isinstance(outcomes, str):
+                try: outcomes = json.loads(outcomes)
+                except: outcomes = []
+            if isinstance(prices, str):
+                try: prices = json.loads(prices)
+                except: prices = []
+            price_map = {str(o).lower(): _safe_float(p) for o, p in zip(outcomes, prices)}
+            yes_p = price_map.get("yes", 0)
+            if yes_p > 0:
+                yes_prices.append(yes_p)
+        return sum(yes_prices) / len(yes_prices) if yes_prices else 0
 
     # ── Process event ─────────────────────────────────────────────────────────
 

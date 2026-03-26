@@ -103,6 +103,20 @@ def check_db_connection() -> bool:
 
 # ── Main scan ──────────────────────────────────────────────────────────────────
 
+def _run_fresh_market_scan():
+    """
+    Standalone fresh market scan — jalan setiap 10 menit.
+    Terpisah dari scan utama agar tidak miss window 5 menit.
+    """
+    if fresh_monitor:
+        try:
+            count = fresh_monitor.scan_fresh_markets()
+            if count:
+                logger.info(f"🆕 Fresh scan: {count} market diproses")
+        except Exception as e:
+            logger.error(f"Fresh market scan error: {e}")
+
+
 def scan_for_opportunities():
     """
     Main bot loop.
@@ -127,12 +141,6 @@ def scan_for_opportunities():
         total_signals     = 0
         total_auto_trades = 0
 
-        # Step 0: Scan fresh bracket markets (harus sebelum NO flood)
-        if fresh_monitor:
-            logger.info("🆕 Scanning fresh bracket markets...")
-            fresh_count = fresh_monitor.scan_fresh_markets()
-            if fresh_count:
-                logger.info(f"🆕 {fresh_count} fresh market diproses")
 
         # Step 1: Fetch + simpan markets
         logger.info("📡 Fetching weather markets...")
@@ -351,6 +359,15 @@ if __name__ == "__main__":
             func=reset_daily_at_midnight, trigger="cron",
             hour=0, minute=0, id="daily_reset", name="Daily Reset",
         )
+        # Fresh market scan — interval lebih pendek (10 menit)
+        # Terpisah dari scan utama agar tidak miss window 5 menit
+        scheduler.add_job(
+            func=_run_fresh_market_scan,
+            trigger="interval",
+            minutes=config.FRESH_MARKET_SCAN_INTERVAL(),
+            id="fresh_scan",
+            name="Fresh Market Scanner",
+        )
         scheduler.start()
         globals()["bot_running"] = True
 
@@ -361,7 +378,7 @@ if __name__ == "__main__":
         logger.info(f"   Min edge   : {config.MIN_EDGE_PCT()}%")
         logger.info(f"   Min conf   : {config.MIN_CONFIDENCE_PCT()}%")
         logger.info(f"   Auto-trade : conf 2265 {config.AUTO_TRADE_THRESHOLD():.0f}% 2192 ${config.AUTO_TRADE_AMOUNT():.0f}")
-        logger.info(f"   Fresh mkt  : window={config.FRESH_MARKET_WINDOW()}min bet=${config.FRESH_MARKET_AUTO_BET()}/bracket")
+        logger.info(f"   Fresh mkt  : scan={config.FRESH_MARKET_SCAN_INTERVAL()}min window={config.FRESH_MARKET_WINDOW()}min bet=${config.FRESH_MARKET_AUTO_BET()}/bracket")
         logger.info(f"   Dashboard  : http://localhost:{config.FLASK_PORT}")
         logger.info("=" * 60)
 
