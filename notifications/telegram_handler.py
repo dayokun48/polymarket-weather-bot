@@ -283,10 +283,10 @@ Open pos   : {open_positions}
 💰 Balance : ${balance:.2f} USDC
 🔑 CLOB    : {'✅ Ready' if config.CLOB_IS_READY() else '❌ Not configured'}
 
-⏱️ Interval: {config.CHECK_INTERVAL_MINUTES()} menit
-🎯 Min edge: {config.MIN_EDGE_PCT()}%
-🔥 Min conf: {config.MIN_CONFIDENCE_PCT()}%
-⚡ Auto-trade ≥ {config.AUTO_TRADE_THRESHOLD():.0f}% conf → ${config.AUTO_TRADE_AMOUNT():.0f}"""
+🆕 Fresh scan : setiap {config.FRESH_MARKET_SCAN_INTERVAL()} menit
+📊 Pre-closing: {config.PRE_CLOSING_HOURS():.0f}h sebelum close
+⚡ Auto-trade  ≥ {config.AUTO_TRADE_THRESHOLD():.0f}% conf → ${config.AUTO_TRADE_AMOUNT():.0f}
+💰 Fresh bet   : ${config.FRESH_MARKET_AUTO_BET()}/bracket"""
             self._send(chat_id, msg)
         except Exception as e:
             self._send(chat_id, f"❌ Error: {e}")

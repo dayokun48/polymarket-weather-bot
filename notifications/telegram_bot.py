@@ -3,13 +3,11 @@ telegram_bot.py
 ================
 Sends alerts and handles button interactions.
 
-Fixes dari original:
-  - signal['forecast_conditions'] tidak ada → pakai signal.get('reasoning')
-  - fair_value & current_price adalah 0-1, bukan cents → tampilkan ×100
-  - test_connection hardcode config → baca dari config.get()
-  - Tambah cooldown check antar alert (alert_cooldown_seconds dari DB)
-  - Tambah bracket market support → tampilkan bracket_label dan forecast_temp
-  - Tambah send_resume_alert untuk bot auto-pause/unpause notification
+Fixes:
+  - Hapus referensi config functions yang sudah dihapus
+    (CHECK_INTERVAL_MINUTES, MIN_EDGE_PCT, MIN_CONFIDENCE_PCT, MAX_DAILY_TRADES)
+  - Update test_connection() dan send_resume_alert() pakai config baru
+  - Update _format_signal_alert() untuk volume_distribution signal type
 """
 
 import logging
@@ -25,343 +23,231 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramBot:
-    """
-    Send Telegram notifications and handle button callbacks.
-    """
 
     def __init__(self):
         self.token    = config.TELEGRAM_BOT_TOKEN
         self.chat_id  = config.TELEGRAM_CHAT_ID
         self.base_url = f"https://api.telegram.org/bot{self.token}"
-        self._last_alert_time: Dict[str, float] = {}  # market_id → timestamp
+        self._last_alert_time: Dict[str, float] = {}
 
         if not self.token or not self.chat_id:
-            logger.warning("⚠️  Telegram tidak dikonfigurasi — alerts dinonaktifkan")
+            logger.warning("⚠️  Telegram tidak dikonfigurasi")
 
     # ── Signal alert ───────────────────────────────────────────────────────────
 
     def send_signal_alert(self, signal: Dict) -> bool:
-        """
-        Kirim trading signal alert ke Telegram dengan tombol EXECUTE / SKIP.
-        Cek cooldown sebelum kirim agar tidak spam.
-        """
         try:
             market_id = signal.get("market_id", "")
-
-            # Cooldown check
             if not self._check_cooldown(market_id):
-                logger.info(f"⏳ Alert skipped (cooldown aktif): {market_id}")
+                logger.info(f"⏳ Alert cooldown: {market_id}")
                 return False
 
             message  = self._format_signal_alert(signal)
-            keyboard = {
-                "inline_keyboard": [[
-                    {
-                        "text": "✅ EXECUTE",
-                        "callback_data": f"execute:{market_id}"
-                    },
-                    {
-                        "text": "❌ SKIP",
-                        "callback_data": f"skip:{market_id}"
-                    }
-                ]]
-            }
+            keyboard = {"inline_keyboard": [[
+                {"text": "✅ EXECUTE", "callback_data": f"execute:{market_id}"},
+                {"text": "❌ SKIP",    "callback_data": f"skip:{market_id}"},
+            ]]}
 
             success = self._send_message(message, keyboard)
             if success:
                 self._last_alert_time[market_id] = time.time()
-                logger.info(f"✅ Alert terkirim: {signal.get('market_question','')[:50]}")
-            else:
-                logger.error("❌ Gagal kirim alert")
-
+                logger.info(f"✅ Alert: {signal.get('market_question','')[:50]}")
             return success
-
         except Exception as e:
-            logger.error(f"Error send_signal_alert: {e}")
+            logger.error(f"send_signal_alert error: {e}")
             return False
 
     # ── Trade confirmation ────────────────────────────────────────────────────
 
     def send_execution_confirmation(self, trade: Dict) -> bool:
-        """Kirim konfirmasi eksekusi trade."""
         try:
             executed_at = trade.get("executed_at")
-            if isinstance(executed_at, datetime):
-                time_str = executed_at.strftime("%Y-%m-%d %H:%M UTC")
-            else:
-                time_str = str(executed_at)
+            time_str    = executed_at.strftime("%Y-%m-%d %H:%M UTC") if isinstance(executed_at, datetime) else str(executed_at)
+            message = f"""✅ <b>TRADE EXECUTED</b>
 
-            message = f"""
-✅ <b>TRADE EXECUTED</b>
-
-📝 <b>Trade ID:</b> <code>{str(trade.get('trade_id',''))[:20]}</code>
-💰 <b>Amount:</b> ${trade.get('bet_size', 0):.2f}
-📊 <b>Direction:</b> {trade.get('direction', '')}
-💵 <b>Entry Price:</b> {trade.get('entry_price', 0):.4f}
-📈 <b>Shares:</b> {trade.get('shares', 0):.2f}
+📝 Trade ID: <code>{str(trade.get('trade_id',''))[:20]}</code>
+💰 Amount  : ${trade.get('bet_size', 0):.2f}
+📊 Dir     : {trade.get('direction', '')}
+💵 Entry   : {trade.get('entry_price', 0):.4f}
+📈 Shares  : {trade.get('shares', 0):.2f}
 
 <b>Market:</b>
 {trade.get('market_question', '')}
 
-⏰ <b>Executed:</b> {time_str}
-💳 <b>Tx Hash:</b> <code>{str(trade.get('tx_hash','N/A'))[:20]}</code>
-
-<b>Status:</b> {trade.get('status', 'open')}
-""".strip()
-
+⏰ {time_str}
+💳 Tx: <code>{str(trade.get('tx_hash','N/A'))[:20]}</code>""".strip()
             return self._send_message(message)
-
         except Exception as e:
-            logger.error(f"Error send_execution_confirmation: {e}")
+            logger.error(f"send_execution_confirmation error: {e}")
             return False
 
-    # ── Position update ────────────────────────────────────────────────────────
+    # ── Position / settlement ─────────────────────────────────────────────────
 
     def send_position_update(self, position: Dict) -> bool:
-        """Kirim update posisi (perubahan P&L)."""
         try:
-            pnl       = position.get("unrealized_pnl", 0)
-            pnl_emoji = "📈" if pnl > 0 else "📉"
+            pnl   = position.get("unrealized_pnl", 0)
+            emoji = "📈" if pnl > 0 else "📉"
+            message = f"""{emoji} <b>POSITION UPDATE</b>
 
-            message = f"""
-{pnl_emoji} <b>POSITION UPDATE</b>
-
-<b>Market:</b>
-{str(position.get('market_question',''))[:80]}
-
-💰 <b>Invested:</b> ${position.get('amount_invested', 0):.2f}
-📊 <b>Entry Price:</b> {position.get('entry_price', 0):.4f}
-💵 <b>Current Price:</b> {position.get('current_price', 0):.4f}
+<b>Market:</b> {str(position.get('market_question',''))[:80]}
+💰 Invested : ${position.get('amount_invested', 0):.2f}
+📊 Entry    : {position.get('entry_price', 0):.4f}
+💵 Current  : {position.get('current_price', 0):.4f}
 <b>Unrealized P&L:</b> ${pnl:+.2f}
 
-⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
-""".strip()
-
+⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}""".strip()
             return self._send_message(message)
-
         except Exception as e:
-            logger.error(f"Error send_position_update: {e}")
+            logger.error(f"send_position_update error: {e}")
             return False
 
-    # ── Settlement ────────────────────────────────────────────────────────────
-
     def send_settlement_alert(self, position: Dict) -> bool:
-        """Kirim notifikasi posisi settled (menang/kalah)."""
         try:
-            outcome       = (position.get("outcome") or "").lower()  # schema: 'win'/'loss'
-            outcome_emoji = "🎉" if outcome == "win" else "😔"
-            outcome_label = outcome.upper() if outcome else "UNKNOWN"
-            pnl           = position.get("realized_pnl", 0)
+            outcome = (position.get("outcome") or "").lower()
+            emoji   = "🎉" if outcome == "win" else "😔"
+            pnl     = position.get("realized_pnl", 0)
+            message = f"""{emoji} <b>POSITION SETTLED — {outcome.upper()}</b>
 
-            opened_at = position.get("opened_at")
-            closed_at = position.get("closed_at")
-            duration  = ""
-            if opened_at and closed_at:
-                try:
-                    duration = f"{(closed_at - opened_at).days} hari"
-                except Exception:
-                    duration = "N/A"
-
-            message = f"""
-{outcome_emoji} <b>POSITION SETTLED — {outcome_label}</b>
-
-<b>Market:</b>
-{position.get('market_question', '')}
-
-💰 <b>Invested:</b> ${position.get('amount_invested', 0):.2f}
-💵 <b>Payout:</b> ${position.get('payout', 0):.2f}
-<b>P&L:</b> ${pnl:+.2f}
-
-📊 <b>Entry:</b> {position.get('entry_price', 0):.4f}
-⏰ <b>Duration:</b> {duration}
-
-<b>Status:</b> CLOSED
-""".strip()
-
+<b>Market:</b> {position.get('market_question', '')}
+💰 Invested : ${position.get('amount_invested', 0):.2f}
+💵 Payout   : ${position.get('payout', 0):.2f}
+<b>P&L:</b> ${pnl:+.2f}""".strip()
             return self._send_message(message)
-
         except Exception as e:
-            logger.error(f"Error send_settlement_alert: {e}")
+            logger.error(f"send_settlement_alert error: {e}")
             return False
 
     # ── Daily summary ──────────────────────────────────────────────────────────
 
     def send_daily_summary(self, stats: Dict) -> bool:
-        """Kirim ringkasan performa harian."""
         try:
-            pnl       = stats.get("daily_pnl", 0)
-            pnl_emoji = "📈" if pnl >= 0 else "📉"
+            pnl   = stats.get("daily_pnl", 0)
+            emoji = "📈" if pnl >= 0 else "📉"
+            message = f"""📊 <b>DAILY SUMMARY</b> — {datetime.now(timezone.utc).strftime('%Y-%m-%d')}
 
-            message = f"""
-📊 <b>DAILY SUMMARY</b>
-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}
+🔢 Trades   : {stats.get('trades_today', 0)} executed
+{emoji} P&L     : ${pnl:+.2f}
+📉 Loss     : ${stats.get('daily_loss', 0):.2f}
+⚡ Consec.  : {stats.get('consecutive_losses', 0)} losses
 
-━━━━━━━━━━━━━━━━━━━━━━━━━
-🔢 <b>Trades:</b> {stats.get('trades_today', 0)} executed
-✅ <b>Remaining:</b> {stats.get('trades_remaining', 0)} today
-{pnl_emoji} <b>P&L:</b> ${pnl:+.2f}
-📉 <b>Total Loss:</b> ${stats.get('daily_loss', 0):.2f}
-⚡ <b>Consecutive Losses:</b> {stats.get('consecutive_losses', 0)}
-━━━━━━━━━━━━━━━━━━━━━━━━━
-
-<i>Polymarket Weather Bot</i>
-""".strip()
-
+<i>Polymarket Weather Bot</i>""".strip()
             return self._send_message(message)
-
         except Exception as e:
-            logger.error(f"Error send_daily_summary: {e}")
+            logger.error(f"send_daily_summary error: {e}")
             return False
 
-    # ── Error / status alerts ─────────────────────────────────────────────────
+    # ── Error / pause alerts ──────────────────────────────────────────────────
 
     def send_error_alert(self, error_message: str) -> bool:
-        """Kirim alert error/warning."""
         try:
-            message = f"""
-🚨 <b>BOT ALERT</b>
+            message = f"""🚨 <b>BOT ALERT</b>
 
 {error_message}
 
-⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
-""".strip()
+⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}""".strip()
             return self._send_message(message)
         except Exception as e:
-            logger.error(f"Error send_error_alert: {e}")
+            logger.error(f"send_error_alert error: {e}")
             return False
 
     def send_pause_alert(self, reason: str) -> bool:
-        """Kirim notifikasi bot di-pause."""
         try:
-            message = f"""
-🛑 <b>BOT PAUSED</b>
+            message = f"""🛑 <b>BOT PAUSED</b>
 
 <b>Reason:</b> {reason}
-
 ⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
 
-Gunakan <code>/unpause</code> untuk melanjutkan.
-""".strip()
+Gunakan /unpause untuk melanjutkan.""".strip()
             return self._send_message(message)
         except Exception as e:
-            logger.error(f"Error send_pause_alert: {e}")
+            logger.error(f"send_pause_alert error: {e}")
             return False
 
     def send_resume_alert(self) -> bool:
-        """Kirim notifikasi bot di-unpause."""
+        """FIX: Pakai config functions yang masih ada."""
         try:
-            message = f"""
-✅ <b>BOT RESUMED</b>
+            message = f"""✅ <b>BOT RESUMED</b>
 
-Bot aktif kembali dan akan scan peluang setiap {config.CHECK_INTERVAL_MINUTES()} menit.
+Bot aktif kembali!
 
-⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
-""".strip()
+⚙️ Mode         : {config.AUTOMATION_MODE()}
+🆕 Fresh scan   : setiap {config.FRESH_MARKET_SCAN_INTERVAL()} menit
+📊 Pre-closing  : {config.PRE_CLOSING_HOURS():.0f}h sebelum close
+⚡ Auto-trade   : conf ≥ {config.AUTO_TRADE_THRESHOLD():.0f}% → ${config.AUTO_TRADE_AMOUNT():.0f}
+
+⏰ {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}""".strip()
             return self._send_message(message)
         except Exception as e:
-            logger.error(f"Error send_resume_alert: {e}")
+            logger.error(f"send_resume_alert error: {e}")
             return False
 
     # ── Connection test ────────────────────────────────────────────────────────
 
     def test_connection(self) -> bool:
-        """Test koneksi Telegram. Baca settings dari config/DB."""
+        """FIX: Pakai config functions yang masih ada."""
         try:
-            message = f"""
-✅ <b>BOT CONNECTED</b>
+            message = f"""✅ <b>BOT CONNECTED</b>
 
-Weather Trading Bot online dan siap!
+Polymarket Weather Trading Bot online!
 
-⚙️ <b>Konfigurasi aktif:</b>
-- Mode: {config.AUTOMATION_MODE()}
-- Scan interval: setiap {config.CHECK_INTERVAL_MINUTES()} menit
-- Min edge: {config.MIN_EDGE_PCT()}%
-- Min confidence: {config.MIN_CONFIDENCE_PCT()}%
-- Max bet: {config.MAX_BET_PCT()}% bankroll
-- Max trades/hari: {config.MAX_DAILY_TRADES()}
+⚙️ <b>Strategy: Volume Distribution</b>
+- Mode         : {config.AUTOMATION_MODE()}
+- Fresh market : ${config.FRESH_MARKET_AUTO_BET()}/bracket, setiap {config.FRESH_MARKET_SCAN_INTERVAL()} menit
+- Pre-closing  : {config.PRE_CLOSING_HOURS():.0f}h sebelum closing
+- Auto-trade   : conf ≥ {config.AUTO_TRADE_THRESHOLD():.0f}% → ${config.AUTO_TRADE_AMOUNT():.0f}
+- Max bet      : {config.MAX_BET_PCT()}% bankroll
 
-🌤️ <b>Weather sources:</b>
-- US cities → NOAA
-- Global → Open-Meteo
-- Verifikasi → Wunderground
+🚀 Bot aktif dan monitoring!
+Gunakan /help untuk daftar commands.
 
-🚀 Bot aktif dan scanning!
-
-<i>Test message berhasil dikirim.</i>
-""".strip()
+<i>Test message berhasil dikirim.</i>""".strip()
             return self._send_message(message)
         except Exception as e:
-            logger.error(f"Connection test failed: {e}")
+            logger.error(f"test_connection error: {e}")
             return False
 
-    # ── Internal helpers ───────────────────────────────────────────────────────
-
-    def _check_cooldown(self, market_id: str) -> bool:
-        """
-        Cek apakah boleh kirim alert untuk market ini.
-        Returns True jika boleh kirim (cooldown sudah lewat atau belum pernah alert).
-        """
-        cooldown = config.ALERT_COOLDOWN_SECONDS()
-        last     = self._last_alert_time.get(market_id, 0)
-        return (time.time() - last) >= cooldown
+    # ── Format signal ─────────────────────────────────────────────────────────
 
     def _format_signal_alert(self, signal: Dict) -> str:
-        """Format signal sebagai HTML message untuk Telegram."""
-
-        # Confidence emoji
+        """Format signal alert — support volume_distribution dan fresh_market."""
         confidence = signal.get("confidence", 0)
-        if confidence >= 90:
-            conf_emoji = "🔥🔥🔥"
-        elif confidence >= 80:
-            conf_emoji = "🔥🔥"
-        else:
-            conf_emoji = "🔥"
+        edge       = signal.get("edge", 0)
+        sig_type   = signal.get("signal_type", "")
 
-        # Risk level berdasarkan edge
-        edge = signal.get("edge", 0)
-        if edge >= 30:
-            risk = "LOW RISK"
-        elif edge >= 20:
-            risk = "MEDIUM RISK"
-        else:
-            risk = "MODERATE RISK"
+        conf_emoji = "🔥🔥🔥" if confidence >= 90 else "🔥🔥" if confidence >= 80 else "🔥"
+        risk       = "LOW RISK" if edge >= 30 else "MEDIUM RISK" if edge >= 20 else "MODERATE RISK"
 
-        # FIX: fair_value & current_price adalah 0-1, tampilkan sebagai %
         fair_value    = signal.get("fair_value", 0) * 100
         current_price = signal.get("current_price", 0) * 100
 
-        # FIX: forecast_conditions tidak ada di signal → pakai sources_used
-        sources = ", ".join(signal.get("sources_used", ["N/A"]))
-
-        # End date
         end_date = signal.get("market_end_date")
-        if isinstance(end_date, datetime):
-            end_str = end_date.strftime("%Y-%m-%d %H:%M UTC")
+        end_str  = end_date.strftime("%Y-%m-%d %H:%M UTC") if isinstance(end_date, datetime) else str(end_date or "TBD")
+
+        # Signal type header
+        if sig_type == "fresh_market_bracket":
+            type_header = "🆕 FRESH MARKET SIGNAL"
+            extra_info  = f"\n🆕 <b>Fresh market</b> — sebelum NO flood"
+        elif sig_type == "volume_distribution":
+            vol_share = signal.get("vol_share", 0)
+            total_vol = signal.get("total_volume", 0)
+            hrs_left  = signal.get("hours_left", 0)
+            type_header = "📊 VOLUME DISTRIBUTION SIGNAL"
+            extra_info  = (
+                f"\n📊 <b>Vol Share:</b> {vol_share:.0f}% dari ${total_vol:,.0f}"
+                f"\n⏱️ <b>Hours left:</b> {hrs_left:.1f}h"
+            )
         else:
-            end_str = str(end_date) if end_date else "TBD"
+            type_header = "🌤️ WEATHER SIGNAL"
+            extra_info  = ""
 
-        # Bracket-specific info
-        bracket_line = ""
-        if signal.get("signal_type") == "weather_temperature_bracket":
-            bracket_line = f"\n🌡️ <b>Bracket:</b> {signal.get('bracket_label', '')}"
-            if signal.get("forecast_temp"):
-                bracket_line += f" | Forecast: {signal.get('forecast_temp')}°C"
-
-        message = f"""
-{conf_emoji} <b>WEATHER ARBITRAGE SIGNAL</b>
+        message = f"""{conf_emoji} <b>{type_header}</b>
 
 📍 <b>Location:</b> {signal.get('location', '')}
-📅 <b>Date:</b> {signal.get('target_date', '')}{bracket_line}
+📅 <b>Date:</b> {signal.get('target_date', '')}
 
 <b>❓ Market:</b>
 {signal.get('market_question', '')}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 <b>ANALYSIS</b>
-
-<b>Weather Forecast:</b> {signal.get('noaa_probability', 0):.0f}% <i>({sources})</i>
-<b>Market Odds:</b> {signal.get('market_probability', 0):.0f}%
-<b>Edge:</b> +{edge:.0f}% 🎯
+{extra_info}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 💰 <b>OPPORTUNITY</b>
@@ -369,39 +255,36 @@ Weather Trading Bot online dan siap!
 <b>Direction:</b> {'✅ BUY YES' if signal.get('direction') == 'YES' else '❌ BUY NO'}
 <b>Current Price:</b> {current_price:.1f}%
 <b>Fair Value:</b> {fair_value:.1f}%
+<b>Edge:</b> +{edge:.0f}% 🎯
 <b>Expected Value:</b> +{signal.get('expected_value', 0):.1f}%
-<b>Payout:</b> {signal.get('payout_multiplier', 0):.2f}x
+<b>Payout:</b> {signal.get('payout_multiplier', 1/signal.get('current_price',1)*100/100 if signal.get('current_price',0) > 0 else 0):.2f}x
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━
-🎯 <b>RECOMMENDATION</b>
-
-<b>Confidence:</b> {confidence:.0f}% | {risk}
-<b>Sources:</b> {sources} ({signal.get('source_count', 1)} source)
+🎯 <b>CONFIDENCE: {confidence:.0f}%</b> | {risk}
 
 <b>Reasoning:</b>
-<i>{signal.get('reasoning', '')}</i>
+<i>{signal.get('reasoning', '')[:200]}</i>
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━
-📈 <b>Market Info</b>
-
-<b>Volume:</b> ${signal.get('market_volume', 0):,.0f}
-<b>Liquidity:</b> ${signal.get('market_liquidity', 0):,.0f}
-<b>Closes:</b> {end_str}
+📈 Volume  : ${signal.get('market_volume', 0):,.0f}
+💧 Liq     : ${signal.get('market_liquidity', 0):,.0f}
+⏰ Closes  : {end_str}
 
 🔗 <a href="{signal.get('market_url', '')}">View on Polymarket</a>
 
-━━━━━━━━━━━━━━━━━━━━━━━━━
-⚠️ <b>Execute this trade?</b>
-""".strip()
+⚠️ <b>Execute this trade?</b>""".strip()
 
         return message
 
-    def _send_message(self, text: str, reply_markup: Dict = None) -> bool:
-        """Kirim message ke Telegram."""
-        if not self.token or not self.chat_id:
-            logger.warning("Telegram tidak dikonfigurasi — pesan dilewati")
-            return False
+    # ── Internal ──────────────────────────────────────────────────────────────
 
+    def _check_cooldown(self, market_id: str) -> bool:
+        cooldown = config.ALERT_COOLDOWN_SECONDS()
+        return (time.time() - self._last_alert_time.get(market_id, 0)) >= cooldown
+
+    def _send_message(self, text: str, reply_markup: Dict = None) -> bool:
+        if not self.token or not self.chat_id:
+            return False
         try:
             payload = {
                 "chat_id":                  self.chat_id,
@@ -409,22 +292,12 @@ Weather Trading Bot online dan siap!
                 "parse_mode":               "HTML",
                 "disable_web_page_preview": True,
             }
-
             if reply_markup:
                 import json
                 payload["reply_markup"] = json.dumps(reply_markup)
-
-            r = requests.post(
-                f"{self.base_url}/sendMessage",
-                json=payload,
-                timeout=10,
-            )
+            r = requests.post(f"{self.base_url}/sendMessage", json=payload, timeout=10)
             r.raise_for_status()
             return r.json().get("ok", False)
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Telegram API error: {e}")
-            return False
         except Exception as e:
-            logger.error(f"Error _send_message: {e}")
+            logger.error(f"_send_message error: {e}")
             return False
