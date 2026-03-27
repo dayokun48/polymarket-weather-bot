@@ -200,33 +200,7 @@ def scan_for_opportunities():
         total_auto_trades = 0
 
 
-        # Step 1: Fetch + simpan markets
-        logger.info("📡 Fetching weather markets...")
-        markets = polymarket.search_weather_markets()
-        if not markets:
-            logger.info("ℹ️  Tidak ada weather market aktif")
-            return
-
-        logger.info(f"💾 Saving {len(markets)} markets ke DB...")
-        polymarket.save_markets_to_db(markets)
-
-        # Step 2: Simpan forecast
-        locations = set()
-        for m in markets:
-            q   = m.get("title", "") if m.get("type") == "bracket" else m.get("question", "")
-            loc = polymarket.extract_location_from_question(q)
-            if loc:
-                locations.add(loc)
-
-        logger.info(f"🌤️  Saving forecast untuk {len(locations)} lokasi...")
-        tomorrow = str(datetime.now(timezone.utc).date())
-        for loc in locations:
-            try:
-                noaa.save_forecast_to_db(loc, tomorrow)
-            except Exception as e:
-                logger.warning(f"⚠️  Gagal simpan forecast {loc}: {e}")
-
-        # Step 3: Analisa
+        # Step 1: Volume analysis
         logger.info("🧠 Analysing opportunities...")
         signals = volume_analyzer.scan_pre_closing()
         if not signals:
