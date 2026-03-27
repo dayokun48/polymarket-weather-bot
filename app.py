@@ -39,25 +39,19 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = config.FLASK_SECRET_KEY
 
 # ── Components ─────────────────────────────────────────────────────────────────
-from collectors.noaa_collector          import NOAACollector
 from collectors.polymarket_collector    import PolymarketCollector
-from analyzers.weather_analyzer         import WeatherAnalyzer
-from analyzers.arbitrage_calculator     import ArbitrageCalculator
+from analyzers.volume_analyzer          import VolumeAnalyzer
 from analyzers.risk_manager             import RiskManager
 from executors.polymarket_trader        import PolymarketTrader
-from executors.position_tracker         import PositionTracker
 from notifications.telegram_bot         import TelegramBot
 from notifications.telegram_handler     import TelegramHandler
 from new_market_monitor                 import FreshMarketMonitor
 
-noaa             = NOAACollector()
 polymarket       = PolymarketCollector()
-weather_analyzer = WeatherAnalyzer(noaa, polymarket)
-arbitrage_calc   = ArbitrageCalculator()
-risk_mgr         = RiskManager(arbitrage_calc)
+volume_analyzer  = VolumeAnalyzer()
+risk_mgr         = RiskManager()
 telegram         = TelegramBot()
 trader           = PolymarketTrader()
-position_tracker = PositionTracker()
 tg_handler: TelegramHandler = None
 fresh_monitor: FreshMarketMonitor = None
 
@@ -105,8 +99,8 @@ def check_db_connection() -> bool:
 
 def _run_fresh_market_scan():
     """
-    Standalone fresh market scan — jalan setiap 10 menit.
-    Terpisah dari scan utama agar tidak miss window 5 menit.
+    Standalone fresh market scan — jalan setiap 5 menit.
+    Terpisah dari scan utama agar tidak miss window 15 menit.
     """
     if fresh_monitor:
         try:
@@ -117,6 +111,24 @@ def _run_fresh_market_scan():
             logger.error(f"Fresh market scan error: {e}")
 
 
+def _run_market_sync():
+    """
+    Sync weather markets dari Polymarket ke DB.
+    Jalan setiap 60 menit agar tabel markets selalu up-to-date
+    untuk VolumeAnalyzer dan dashboard.
+    """
+    try:
+        logger.info("🔄 Syncing weather markets ke DB...")
+        markets = polymarket.search_weather_markets()
+        if markets:
+            polymarket.save_markets_to_db(markets)
+            logger.info(f"💾 {len(markets)} markets synced ke DB")
+        else:
+            logger.info("ℹ️  Tidak ada weather market saat ini")
+    except Exception as e:
+        logger.error(f"_run_market_sync error: {e}")
+
+
 def _run_pre_closing_scan():
     """
     Pre-closing volume analysis — scheduler 4 jam sebelum closing.
@@ -124,7 +136,7 @@ def _run_pre_closing_scan():
     """
     logger.info("📊 Pre-closing volume scan...")
     try:
-        signals = weather_analyzer.find_opportunities()
+        signals = volume_analyzer.scan_pre_closing()
         if not signals:
             logger.info("   Tidak ada signal volume")
             return
@@ -216,7 +228,7 @@ def scan_for_opportunities():
 
         # Step 3: Analisa
         logger.info("🧠 Analysing opportunities...")
-        signals = weather_analyzer.find_opportunities()
+        signals = volume_analyzer.scan_pre_closing()
         if not signals:
             logger.info("ℹ️  Tidak ada signal yang memenuhi kriteria")
             last_check = datetime.now(timezone.utc)
@@ -230,6 +242,14 @@ def scan_for_opportunities():
                 is_valid, reason = risk_mgr.validate_signal(signal, bankroll, real_balance)
                 if not is_valid:
                     logger.info(f"⏭️  Skip: {reason}")
+                    if "Saldo real" in reason:
+                        telegram.send_error_alert(
+                            f"⚠️ Signal ditemukan tapi saldo tidak cukup\n\n"
+                            f"💰 Balance: ${real_balance:.2f} USDC\n"
+                            f"📊 {signal.get('market_question','')[:60]}\n"
+                            f"❌ {reason}\n\n"
+                            f"Deposit USDC ke wallet untuk bisa execute."
+                        )
                     continue
 
                 bet_size = risk_mgr.calculate_position_size(signal, bankroll)
@@ -255,7 +275,7 @@ def scan_for_opportunities():
                             entry_price=signal.get("current_price", 0.5),
                             tx_hash=trade_result.get("tx_hash"),
                         )
-                        position_tracker.add_position(trade_result)
+                        
                         telegram.send_execution_confirmation(trade_result)
                     total_auto_trades += 1
 
@@ -284,7 +304,7 @@ def scan_for_opportunities():
                 continue
 
         last_check = datetime.now(timezone.utc)
-        position_tracker.save_daily_performance()
+        
 
         logger.info("=" * 60)
         logger.info(f"✅ Scan done — {total_signals} signals | {total_auto_trades} auto-trades")
@@ -298,7 +318,7 @@ def scan_for_opportunities():
 def reset_daily_at_midnight():
     logger.info("🔄 Midnight reset")
     risk_mgr.reset_daily_limits()
-    position_tracker.save_daily_performance()
+    
 
 
 # ── Flask API routes ───────────────────────────────────────────────────────────
@@ -326,7 +346,7 @@ def trigger_scan():
 @app.route("/api/status")
 def api_status():
     stats = risk_mgr.get_daily_stats()
-    perf  = position_tracker.get_performance_stats()
+    perf  = {}
     return jsonify({
         "bot_running":    bot_running,
         "mode":           config.AUTOMATION_MODE(),
@@ -389,7 +409,7 @@ if __name__ == "__main__":
 
         # 5b. Init Fresh Market Monitor
         logger.info("🆕 Starting Fresh Market Monitor...")
-        globals()["fresh_monitor"] = FreshMarketMonitor(weather_analyzer, trader, telegram)
+        globals()["fresh_monitor"] = FreshMarketMonitor(volume_analyzer, trader, telegram)
         logger.info(f"✅ Fresh Market Monitor ready — window={config.FRESH_MARKET_WINDOW()}min bet=${config.FRESH_MARKET_AUTO_BET()}/bracket")
 
         # 6. Scheduler
@@ -397,7 +417,14 @@ if __name__ == "__main__":
         from apscheduler.schedulers.background import BackgroundScheduler
         scheduler = BackgroundScheduler()
 
-        # Fresh market scan — setiap 10 menit (window ~5 menit)
+        # Market sync ke DB — setiap 60 menit
+        scheduler.add_job(
+            func=_run_market_sync, trigger="interval",
+            minutes=60,
+            id="market_sync", name="Market DB Sync",
+        )
+
+        # Fresh market scan — setiap 5 menit
         scheduler.add_job(
             func=_run_fresh_market_scan, trigger="interval",
             minutes=config.FRESH_MARKET_SCAN_INTERVAL(),
@@ -438,7 +465,23 @@ if __name__ == "__main__":
         logger.info(f"   Dashboard    : http://localhost:{config.FLASK_PORT}")
         logger.info("=" * 60)
 
-        # 7. Initial scan (5 detik setelah start)
+        # 7. Initial market sync (10 detik setelah start)
+        scheduler.add_job(
+            func=_run_market_sync, trigger="date",
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=10),
+            id="initial_market_sync", name="Initial Market Sync",
+        )
+        logger.info("🔄 Initial market sync in 10 seconds...")
+
+        # Initial pre-closing scan (30 detik setelah start)
+        scheduler.add_job(
+            func=_run_pre_closing_scan, trigger="date",
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=30),
+            id="initial_pre_closing", name="Initial Pre-Closing Scan",
+        )
+        logger.info("📊 Initial pre-closing scan in 30 seconds...")
+
+        # Dummy untuk backward compat
         scheduler.add_job(
             func=scan_for_opportunities, trigger="date",
             run_date=datetime.now(timezone.utc) + timedelta(seconds=5),

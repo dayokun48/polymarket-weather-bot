@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Dashboard — WeatherBot{% endblock %}
-
 {% block content %}
+
 <div class="page-header">
   <h1 class="page-title">📊 Dashboard</h1>
-  <div class="page-meta">
+  <div style="display:flex;gap:12px;align-items:center">
     <span class="badge badge-{{ 'green' if automation_mode=='full-auto' else 'yellow' if automation_mode=='semi-auto' else 'dim' }}">
       {{ automation_mode|upper }}
     </span>
@@ -12,13 +12,13 @@
   </div>
 </div>
 
-<!-- Strategy Info Banner -->
+<!-- Strategy Banner -->
 <div class="strategy-banner">
   <div class="strategy-item">
     <span class="strategy-icon">🆕</span>
     <div>
       <div class="strategy-label">Fresh Market</div>
-      <div class="strategy-val">Scan {{ next_fresh_scan }} | ${{ fresh_bet }}/bracket</div>
+      <div class="strategy-val">Scan setiap {{ fresh_interval }} menit | ${{ fresh_bet }}/bracket | ~17:00 WIB</div>
     </div>
   </div>
   <div class="strategy-divider"></div>
@@ -26,7 +26,7 @@
     <span class="strategy-icon">📊</span>
     <div>
       <div class="strategy-label">Pre-Closing Volume</div>
-      <div class="strategy-val">{{ next_pre_closing }} | {{ pre_closing_hours }}h before close</div>
+      <div class="strategy-val">{{ pre_closing_h }}h sebelum closing | 13:00 & 15:00 WIB</div>
     </div>
   </div>
   <div class="strategy-divider"></div>
@@ -34,149 +34,113 @@
     <span class="strategy-icon">⚡</span>
     <div>
       <div class="strategy-label">Auto-Trade</div>
-      <div class="strategy-val">conf ≥ {{ auto_threshold|int }}% → ${{ auto_amount|int }}</div>
+      <div class="strategy-val">conf ≥ {{ auto_threshold|int }}% → ${{ auto_amount|int }} | EXECUTE/SKIP button</div>
     </div>
   </div>
 </div>
 
-<!-- KPI Row -->
+<!-- KPI -->
 <div class="kpi-row">
-  <div class="kpi-card {% if today_perf and today_perf.realized_pnl > 0 %}green{% elif today_perf and today_perf.realized_pnl < 0 %}red{% endif %}">
-    <div class="kpi-label">TODAY P&L</div>
-    <div class="kpi-value">
-      ${{ "%.2f"|format(today_perf.realized_pnl|float) if today_perf else "0.00" }}
-    </div>
-  </div>
   <div class="kpi-card">
     <div class="kpi-label">SIGNALS TODAY</div>
-    <div class="kpi-value">{{ total_signals_today }}</div>
+    <div class="kpi-value">{{ stats.total or 0 }}</div>
   </div>
   <div class="kpi-card green">
-    <div class="kpi-label">🆕 FRESH</div>
-    <div class="kpi-value">{{ fresh_signals_today }}</div>
+    <div class="kpi-label">EXECUTED</div>
+    <div class="kpi-value">{{ stats.executed or 0 }}</div>
   </div>
-  <div class="kpi-card blue">
-    <div class="kpi-label">📊 VOLUME</div>
-    <div class="kpi-value">{{ volume_signals_today }}</div>
-  </div>
-  <div class="kpi-card">
-    <div class="kpi-label">OPEN POSITIONS</div>
-    <div class="kpi-value">{{ total_open_positions }}</div>
+  <div class="kpi-card yellow">
+    <div class="kpi-label">PENDING</div>
+    <div class="kpi-value">{{ stats.pending or 0 }}</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">EXPOSURE</div>
-    <div class="kpi-value">${{ "%.2f"|format(total_exposure) }}</div>
+    <div class="kpi-label">SKIPPED</div>
+    <div class="kpi-value">{{ stats.skipped or 0 }}</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-label">WIN RATE</div>
-    <div class="kpi-value {% if win_rate >= 60 %}green{% elif win_rate >= 40 %}yellow{% else %}red{% endif %}">
-      {{ win_rate }}%
+    <div class="kpi-label">AVG EDGE</div>
+    <div class="kpi-value {% if stats.avg_edge and stats.avg_edge|float > 0 %}green{% endif %}">
+      {{ stats.avg_edge or '0.0' }}%
     </div>
   </div>
-  <div class="kpi-card {% if total_pnl >= 0 %}green{% else %}red{% endif %}">
-    <div class="kpi-label">TOTAL P&L</div>
-    <div class="kpi-value">${{ "%.2f"|format(total_pnl) }}</div>
+  <div class="kpi-card">
+    <div class="kpi-label">AVG CONF</div>
+    <div class="kpi-value">{{ stats.avg_conf or '0.0' }}%</div>
+  </div>
+  <div class="kpi-card {% if balance >= 5 %}green{% else %}red{% endif %}">
+    <div class="kpi-label">BALANCE</div>
+    <div class="kpi-value">${{ "%.2f"|format(balance) }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">CLOB</div>
+    <div class="kpi-value">{{ '✅' if clob_ok else '❌' }}</div>
   </div>
 </div>
 
-<div class="two-col">
-
-  <!-- Recent Signals -->
-  <div class="card">
-    <div class="card-header">
-      🔔 Recent Signals
-      <a href="/signals" class="card-link">View all →</a>
-    </div>
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>TIME</th><th>LOCATION</th><th>TYPE</th>
-            <th>DIR</th><th>EDGE</th><th>STATUS</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for s in recent_signals %}
-          <tr>
-            <td class="mono text-dim text-sm">
-              {{ s.created_at.strftime('%H:%M') if s.created_at else '—' }}
-            </td>
-            <td class="text-blue text-sm">{{ s.location or '—' }}</td>
-            <td>
-              {% if s.signal_type == 'fresh_market_bracket' %}
-                <span class="badge badge-green text-xs">🆕</span>
-              {% else %}
-                <span class="badge badge-blue text-xs">📊</span>
-              {% endif %}
-            </td>
-            <td>
-              <span class="badge {% if s.direction=='YES' %}badge-green{% else %}badge-red{% endif %} text-xs">
-                {{ s.direction }}
-              </span>
-            </td>
-            <td class="mono text-sm {% if s.edge|float >= 20 %}text-green{% endif %}">
-              +{{ s.edge|round(0)|int if s.edge else 0 }}%
-            </td>
-            <td>
-              <span class="badge {% if s.status=='executed' %}badge-green{% elif s.status=='pending' %}badge-yellow{% else %}badge-dim{% endif %} text-xs">
-                {{ s.status or 'pending' }}
-              </span>
-            </td>
-          </tr>
-          {% else %}
-          <tr><td colspan="6" class="empty-state text-sm">No signals today</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+<!-- Recent Signals -->
+<div class="card">
+  <div class="card-header">
+    🔔 Signals Today — {{ today }}
+    <a href="/signals" class="card-link">View all →</a>
   </div>
-
-  <!-- Open Positions -->
-  <div class="card">
-    <div class="card-header">
-      📈 Open Positions
-      <a href="/positions" class="card-link">View all →</a>
-    </div>
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>MARKET</th><th>DIR</th><th>BET</th><th>ENTRY</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for t in open_trades %}
-          <tr>
-            <td class="text-sm">{{ (t.market_question or '—')[:40] }}</td>
-            <td>
-              <span class="badge {% if t.direction=='YES' %}badge-green{% else %}badge-red{% endif %} text-xs">
-                {{ t.direction }}
-              </span>
-            </td>
-            <td class="mono text-sm">${{ "%.2f"|format(t.bet_size|float) }}</td>
-            <td class="mono text-sm">{{ "%.3f"|format(t.entry_price|float) }}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="4" class="empty-state text-sm">No open positions</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>TIME</th><th>LOCATION</th><th>TYPE</th>
+          <th>DIR</th><th>EDGE</th><th>CONF</th><th>STATUS</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in recent_signals %}
+        <tr>
+          <td class="mono text-dim text-sm">{{ s.created_at.strftime('%H:%M') if s.created_at else '—' }}</td>
+          <td class="text-blue">{{ s.location or '—' }}</td>
+          <td>
+            {% if s.signal_type == 'fresh_market_bracket' %}
+              <span class="badge badge-green text-xs">🆕 Fresh</span>
+            {% else %}
+              <span class="badge badge-blue text-xs">📊 Vol</span>
+            {% endif %}
+          </td>
+          <td><span class="badge {% if s.direction=='YES' %}badge-green{% else %}badge-red{% endif %} text-xs">{{ s.direction }}</span></td>
+          <td class="mono text-sm {% if s.edge|float >= 20 %}text-green{% endif %}">+{{ s.edge|round(0)|int if s.edge else 0 }}%</td>
+          <td class="mono text-sm">{{ s.confidence|round(0)|int if s.confidence else 0 }}%</td>
+          <td><span class="badge {% if s.status=='executed' %}badge-green{% elif s.status=='pending' %}badge-yellow{% else %}badge-dim{% endif %} text-xs">{{ s.status or 'pending' }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty-state">Belum ada signal hari ini</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
+</div>
 
+<!-- Quick Links -->
+<div class="quick-links">
+  <a href="https://polymarket.com/markets" target="_blank" class="quick-link">
+    🌐 Polymarket Markets
+  </a>
+  <a href="https://polymarket.com/portfolio" target="_blank" class="quick-link">
+    💼 My Portfolio
+  </a>
+  <a href="https://polymarket.com/activity" target="_blank" class="quick-link">
+    📈 Trade History
+  </a>
 </div>
 
 <style>
-.strategy-banner { display:flex; gap:0; background:var(--bg-card); border:1px solid var(--border); border-radius:8px; margin-bottom:20px; overflow:hidden; }
-.strategy-item   { display:flex; align-items:center; gap:12px; padding:14px 24px; flex:1; }
-.strategy-icon   { font-size:24px; }
-.strategy-label  { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em; font-weight:600; }
-.strategy-val    { font-size:13px; color:var(--text-primary); margin-top:2px; }
-.strategy-divider{ width:1px; background:var(--border); }
-.page-meta       { display:flex; align-items:center; gap:12px; }
-.two-col         { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-.text-xs         { font-size:11px; }
-.text-sm         { font-size:12px; }
-@media(max-width:900px){ .two-col{ grid-template-columns:1fr; } .strategy-banner{ flex-direction:column; } }
+.strategy-banner{display:flex;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;margin-bottom:20px;overflow:hidden}
+.strategy-item{display:flex;align-items:center;gap:12px;padding:14px 24px;flex:1}
+.strategy-icon{font-size:24px}
+.strategy-label{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+.strategy-val{font-size:13px;color:var(--text-primary);margin-top:2px}
+.strategy-divider{width:1px;background:var(--border)}
+.text-xs{font-size:11px}
+.text-sm{font-size:12px}
+.quick-links{display:flex;gap:12px;margin-top:16px;flex-wrap:wrap}
+.quick-link{background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);padding:10px 18px;border-radius:6px;text-decoration:none;font-size:13px;transition:.2s}
+.quick-link:hover{border-color:var(--blue);color:var(--blue)}
+@media(max-width:900px){.strategy-banner{flex-direction:column}}
 </style>
 {% endblock %}
