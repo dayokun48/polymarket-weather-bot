@@ -58,12 +58,8 @@
         {% set hrs = m.hours_left|int if m.hours_left else 999 %}
         <tr class="{% if hrs <= 4 %}row-urgent{% elif hrs <= 24 %}row-soon{% endif %}">
           <td class="text-sm">{{ (m.question or '—')[:60] }}</td>
-          <td class="mono {% if m.yes_price and m.yes_price|float > 0.3 %}text-green{% endif %}">
-            {{ "%.1f"|format(m.yes_price|float * 100) if m.yes_price else '—' }}¢
-          </td>
-          <td class="mono">
-            {{ "%.1f"|format(m.no_price|float * 100) if m.no_price else '—' }}¢
-          </td>
+          <td class="mono text-dim">—</td>
+          <td class="mono text-dim">—</td>
           <td class="mono">${{ "{:,.0f}".format(m.volume|float) if m.volume else '0' }}</td>
           <td class="mono">${{ "{:,.0f}".format(m.liquidity|float) if m.liquidity else '0' }}</td>
           <td class="mono text-dim text-sm">
