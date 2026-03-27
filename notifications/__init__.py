@@ -1,7 +1,2 @@
-"""
-Notifications package
-"""
-
-from .telegram_bot import TelegramBot
-
-__all__ = ['TelegramBot']
+from .telegram_bot     import TelegramBot
+from .telegram_handler import TelegramHandler
