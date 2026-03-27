@@ -1,8 +1,2 @@
-"""
-Data collectors package
-"""
-
-from .noaa_collector import NOAACollector
+# collectors/__init__.py
 from .polymarket_collector import PolymarketCollector
-
-__all__ = ['NOAACollector', 'PolymarketCollector']
