@@ -7,8 +7,6 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-
-<!-- ── Sidebar ───────────────────────────────────────────────── -->
 <aside class="sidebar">
   <div class="sidebar-brand">
     <a href="{{ url_for('overview.index') }}" class="logo">
@@ -19,35 +17,26 @@
       </div>
     </a>
   </div>
-
   <nav class="sidebar-nav">
     <div class="nav-section-label">Monitor</div>
-    <a href="{{ url_for('overview.index') }}"
-       class="nav-link {% if request.endpoint == 'overview.index' %}active{% endif %}">
+    <a href="{{ url_for('overview.index') }}" class="nav-link {% if request.endpoint == 'overview.index' %}active{% endif %}">
       <span class="nav-icon">📊</span> Dashboard
     </a>
-    <a href="{{ url_for('signals.list_signals') }}"
-       class="nav-link {% if request.endpoint == 'signals.list_signals' %}active{% endif %}">
+    <a href="{{ url_for('signals.list_signals') }}" class="nav-link {% if request.endpoint == 'signals.list_signals' %}active{% endif %}">
       <span class="nav-icon">🔔</span> Signals
     </a>
-    <a href="{{ url_for('markets.list_markets') }}"
-       class="nav-link {% if request.endpoint == 'markets.list_markets' %}active{% endif %}">
-      <span class="nav-icon">🌤️</span> Markets
+    <div class="nav-section-label" style="margin-top:8px;">Polymarket</div>
+    <a href="https://polymarket.com/markets" target="_blank" class="nav-link">
+      <span class="nav-icon">🌤️</span> Markets ↗
     </a>
-
-    <div class="nav-section-label" style="margin-top:8px;">Trading</div>
-    <a href="{{ url_for('positions.list_positions') }}"
-       class="nav-link {% if request.endpoint == 'positions.list_positions' %}active{% endif %}">
-      <span class="nav-icon">📈</span> Positions
+    <a href="https://polymarket.com/portfolio" target="_blank" class="nav-link">
+      <span class="nav-icon">📈</span> Positions ↗
     </a>
-    <a href="{{ url_for('performance.show_performance') }}"
-       class="nav-link {% if request.endpoint == 'performance.show_performance' %}active{% endif %}">
-      <span class="nav-icon">🏆</span> Performance
+    <a href="https://polymarket.com/activity" target="_blank" class="nav-link">
+      <span class="nav-icon">🏆</span> Trade History ↗
     </a>
-
     <div class="nav-section-label" style="margin-top:8px;">System</div>
-    <a href="{{ url_for('settings.manage_settings') }}"
-       class="nav-link {% if request.endpoint == 'settings.manage_settings' %}active{% endif %}">
+    <a href="{{ url_for('settings.manage_settings') }}" class="nav-link {% if request.endpoint == 'settings.manage_settings' %}active{% endif %}">
       <span class="nav-icon">⚙️</span> Settings
     </a>
     <a href="/api/trigger-scan" class="nav-link">
@@ -57,7 +46,6 @@
       <span class="nav-icon">💚</span> Health
     </a>
   </nav>
-
   <div class="sidebar-footer">
     <div class="bot-status">
       <span class="status-dot"></span>
@@ -65,8 +53,6 @@
     </div>
   </div>
 </aside>
-
-<!-- ── Main ──────────────────────────────────────────────────── -->
 <div class="main">
   <header class="topbar">
     <span class="topbar-title">{% block page_title %}Dashboard{% endblock %}</span>
@@ -76,30 +62,22 @@
       <span style="color:var(--blue)">WIB</span>
     </div>
   </header>
-
   <div class="page-content">
     {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for category, message in messages %}
-          <div class="alert alert-{{ category }}">{{ message }}</div>
-        {% endfor %}
-      {% endif %}
+      {% if messages %}{% for category, message in messages %}
+        <div class="alert alert-{{ category }}">{{ message }}</div>
+      {% endfor %}{% endif %}
     {% endwith %}
-
     {% block content %}{% endblock %}
   </div>
 </div>
-
 <script>
-// Live clock WIB (UTC+7)
 function updateClock() {
   const now = new Date();
-  const wib = new Date(now.getTime() + (7 * 60 * 60 * 1000));
-  document.getElementById('clock').textContent =
-    wib.toUTCString().slice(17, 25);
+  const wib = new Date(now.getTime() + (7*60*60*1000));
+  document.getElementById('clock').textContent = wib.toUTCString().slice(17,25);
 }
-updateClock();
-setInterval(updateClock, 1000);
+updateClock(); setInterval(updateClock, 1000);
 </script>
 </body>
 </html>
