@@ -1,5 +1,4 @@
 version: '3.8'
-
 services:
   # Weather Trading Bot
   weather-bot:
@@ -14,7 +13,8 @@ services:
       - .:/app
       - ./logs:/app/logs
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     networks:
       - weather-net
 
@@ -33,6 +33,12 @@ services:
       - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
     networks:
       - weather-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # phpMyAdmin
   phpmyadmin:
@@ -45,7 +51,8 @@ services:
     ports:
       - "8081:80"
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     networks:
       - weather-net
 
