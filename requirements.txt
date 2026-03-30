@@ -23,3 +23,6 @@ APScheduler>=3.10.0
 # ── Blockchain / wallet (opsional — hanya untuk full-auto) ────
 web3>=6.0.0
 eth-account>=0.10.0
+
+# -- Polymarket CLOB trading (wajib untuk real trading) --------
+py-clob-client>=0.16.0
