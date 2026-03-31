@@ -70,6 +70,7 @@ jobs:
       - name: Deploy
         run: |
           echo "🚀 Deploying..."
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
           cd ~/Documents/Project/Polymarket
           git pull origin main
           docker pull ${{ env.IMAGE_NAME }}:latest
